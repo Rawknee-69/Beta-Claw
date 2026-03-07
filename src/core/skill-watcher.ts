@@ -17,7 +17,7 @@ class SkillWatcher extends EventEmitter {
 
   constructor(skillsDir?: string) {
     super();
-    this.skillsDir = resolve(skillsDir ?? '.claude/skills');
+    this.skillsDir = resolve(skillsDir ?? 'skills');
   }
 
   watch(): void {

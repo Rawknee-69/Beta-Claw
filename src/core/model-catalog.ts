@@ -3,7 +3,7 @@ import type { IProviderAdapter, ModelEntry as ProviderModel } from '../providers
 import type { ProviderRegistry } from './provider-registry.js';
 import pino from 'pino';
 
-export type ModelTier = 'nano' | 'standard' | 'pro';
+export type ModelTier = 'nano' | 'standard' | 'pro' | 'max';
 
 export interface ModelEntry {
   id: string;
@@ -14,35 +14,71 @@ export interface ModelEntry {
 }
 
 export const DEFAULT_CATALOG: ModelEntry[] = [
+  // ─── Anthropic ────────────────────────────────────────────────
   { id: 'claude-haiku-4-5-20251001',  provider_id: 'anthropic', tier: 'nano',     contextTokens: 200_000 },
   { id: 'claude-sonnet-4-6',          provider_id: 'anthropic', tier: 'standard', contextTokens: 200_000 },
-  { id: 'claude-opus-4-6',            provider_id: 'anthropic', tier: 'pro',      contextTokens: 200_000, note: '1M ctx with beta header' },
+  { id: 'claude-opus-4-6',            provider_id: 'anthropic', tier: 'pro',      contextTokens: 200_000 },
 
+  // ─── Google Gemini ────────────────────────────────────────────
   { id: 'gemini-2.5-flash-lite',      provider_id: 'google',    tier: 'nano',     contextTokens: 1_000_000 },
   { id: 'gemini-2.5-flash',           provider_id: 'google',    tier: 'standard', contextTokens: 1_000_000 },
   { id: 'gemini-2.5-pro',             provider_id: 'google',    tier: 'pro',      contextTokens: 1_000_000 },
-  { id: 'gemini-3.1-pro-preview',     provider_id: 'google',    tier: 'pro',      contextTokens: 1_000_000, note: 'preview' },
+  { id: 'gemini-3.1-pro-preview',     provider_id: 'google',    tier: 'max',      contextTokens: 1_000_000, note: 'preview — flagship' },
+  { id: 'gemini-3-flash-preview',     provider_id: 'google',    tier: 'standard', contextTokens: 1_000_000, note: 'preview' },
+  { id: 'gemini-3.1-flash-lite-preview', provider_id: 'google', tier: 'nano',    contextTokens: 1_000_000, note: 'preview' },
 
-  { id: 'meta-llama/llama-3.1-8b-instruct',  provider_id: 'openrouter', tier: 'nano',     contextTokens: 128_000 },
-  { id: 'meta-llama/llama-4-maverick',        provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
-  { id: 'meta-llama/llama-3.3-70b-instruct',  provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
-  { id: 'deepseek/deepseek-chat-v3-0324',     provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
-  { id: 'mistralai/mistral-large-2',          provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
-  { id: 'mistralai/devstral-2',               provider_id: 'openrouter', tier: 'standard', contextTokens: 262_000, note: 'coding agent' },
-  { id: 'qwen/qwen3-235b-a22b',               provider_id: 'openrouter', tier: 'standard', contextTokens: 131_072 },
-  { id: 'deepseek/deepseek-r1',               provider_id: 'openrouter', tier: 'pro',      contextTokens: 128_000, note: 'reasoning/CoT' },
+  // ─── OpenRouter (multi-provider) ─────────────────────────────
+  { id: 'meta-llama/llama-3.1-8b-instruct',      provider_id: 'openrouter', tier: 'nano',     contextTokens: 128_000 },
+  { id: 'meta-llama/llama-3.2-3b-instruct',      provider_id: 'openrouter', tier: 'nano',     contextTokens: 128_000 },
+  { id: 'meta-llama/llama-4-maverick',            provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
+  { id: 'meta-llama/llama-4-scout',               provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
+  { id: 'meta-llama/llama-3.3-70b-instruct',      provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
+  { id: 'deepseek/deepseek-chat-v3-0324',         provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
+  { id: 'mistralai/mistral-large-2',              provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
+  { id: 'mistralai/devstral-2',                   provider_id: 'openrouter', tier: 'standard', contextTokens: 262_000, note: 'coding agent' },
+  { id: 'qwen/qwen3-235b-a22b',                   provider_id: 'openrouter', tier: 'standard', contextTokens: 131_072 },
+  { id: 'qwen/qwen3-72b',                         provider_id: 'openrouter', tier: 'pro',      contextTokens: 131_072 },
+  { id: 'deepseek/deepseek-r1',                   provider_id: 'openrouter', tier: 'pro',      contextTokens: 128_000, note: 'reasoning/CoT' },
+  { id: 'openai/gpt-4o',                          provider_id: 'openrouter', tier: 'pro',      contextTokens: 128_000 },
+  { id: 'openai/gpt-4o-mini',                     provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
+  { id: 'openai/o3',                              provider_id: 'openrouter', tier: 'max',      contextTokens: 200_000, note: 'extended reasoning' },
+  { id: 'openai/gpt-5',                           provider_id: 'openrouter', tier: 'max',      contextTokens: 200_000, note: 'flagship' },
+
+  // ─── OpenAI direct ───────────────────────────────────────────
+  { id: 'gpt-4o',                     provider_id: 'openai',    tier: 'pro',      contextTokens: 128_000 },
+  { id: 'gpt-4o-mini',                provider_id: 'openai',    tier: 'standard', contextTokens: 128_000 },
+  { id: 'gpt-5',                      provider_id: 'openai',    tier: 'max',      contextTokens: 200_000 },
+  { id: 'o3',                         provider_id: 'openai',    tier: 'max',      contextTokens: 200_000 },
+  { id: 'o3-mini',                    provider_id: 'openai',    tier: 'pro',      contextTokens: 200_000 },
+
+  // ─── Groq ────────────────────────────────────────────────────
+  { id: 'llama-3.1-8b-instant',       provider_id: 'groq',      tier: 'nano',     contextTokens: 128_000 },
+  { id: 'llama-3.3-70b-versatile',    provider_id: 'groq',      tier: 'standard', contextTokens: 128_000 },
+  { id: 'llama-4-maverick-17b-128e-instruct', provider_id: 'groq', tier: 'standard', contextTokens: 128_000 },
+  { id: 'llama-4-scout-17b-16e-instruct',     provider_id: 'groq', tier: 'nano',    contextTokens: 128_000 },
+
+  // ─── DeepSeek direct ─────────────────────────────────────────
+  { id: 'deepseek-chat',              provider_id: 'deepseek',  tier: 'standard', contextTokens: 64_000 },
+  { id: 'deepseek-reasoner',          provider_id: 'deepseek',  tier: 'pro',      contextTokens: 64_000, note: 'R1 reasoning' },
+
+  // ─── Mistral direct ──────────────────────────────────────────
+  { id: 'mistral-large-latest',       provider_id: 'mistral',   tier: 'standard', contextTokens: 128_000 },
+  { id: 'mistral-small-latest',       provider_id: 'mistral',   tier: 'nano',     contextTokens: 128_000 },
+  { id: 'devstral-latest',            provider_id: 'mistral',   tier: 'standard', contextTokens: 262_000 },
 ];
 
 interface TierThresholds {
   nanoMaxCost: number;
   standardMaxCost: number;
   proMaxCost: number;
+  maxMinCost?: number;
 }
 
 const DEFAULT_THRESHOLDS: TierThresholds = {
   nanoMaxCost: 0.5,
   standardMaxCost: 5.0,
   proMaxCost: 20.0,
+  maxMinCost: 20.0,
 };
 
 const CATALOG_TTL_MS = 4 * 60 * 60 * 1000;
@@ -169,7 +205,18 @@ class ModelCatalog {
 
   private assignTier(model: ProviderModel): ModelTier {
     const avgCost = (model.inputCostPer1M + model.outputCostPer1M) / 2;
+    const maxMin = this.thresholds.maxMinCost ?? 20.0;
 
+    // Name-based overrides for well-known flagship models
+    const id = model.id.toLowerCase();
+    if (id.includes('o3') || id.includes('o4') || id.includes('gpt-5') || id.includes('claude-opus-4')) {
+      return 'max';
+    }
+    if (id.includes('opus') || id.includes('deepseek-r1') || id.includes('o3-mini')) {
+      return 'pro';
+    }
+
+    if (avgCost > maxMin) return 'max';
     if (avgCost <= this.thresholds.nanoMaxCost) return 'nano';
     if (avgCost <= this.thresholds.standardMaxCost) return 'standard';
     return 'pro';

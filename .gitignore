@@ -5,7 +5,7 @@ node_modules
 out
 dist
 *.tgz
-
+.micro/
 # code coverage
 coverage
 *.lcov
@@ -19,6 +19,9 @@ MicroClaw_FULL_DOC.md
 logs
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+CLAUDE.md
+MICROCLAW_FULL_DOC.md
+.cursor/
 
 :memory:
 

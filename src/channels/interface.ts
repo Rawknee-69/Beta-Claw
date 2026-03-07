@@ -40,6 +40,8 @@ interface IChannel {
   send(msg: OutboundMessage): Promise<void>;
   onMessage(handler: (msg: InboundMessage) => void | Promise<void>): void;
   supportsFeature(f: ChannelFeature): boolean;
+  /** Show a "typing…" indicator to the recipient. Fire-and-forget; silently ignored if unsupported. */
+  sendTyping?(jid: string): Promise<void>;
 }
 
 export type {

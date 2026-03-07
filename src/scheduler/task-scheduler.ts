@@ -6,6 +6,7 @@ import type { ModelEntry } from '../core/model-catalog.js';
 import { agentLoop } from '../core/agent-loop.js';
 import { buildSystemPrompt } from '../core/prompt-builder.js';
 import { selectModel } from '../core/model-selector.js';
+import type { WhatsAppSendFn } from '../core/tool-executor.js';
 
 export interface TaskFiredEvent {
   taskId: string;
@@ -21,6 +22,7 @@ export class TaskScheduler extends EventEmitter {
     private db: MicroClawDB,
     private registry?: ProviderRegistry,
     private catalog?: ModelEntry[],
+    private whatsappSend?: WhatsAppSendFn,
     private onMessage?: (groupId: string, text: string) => Promise<void>,
   ) {
     super();
@@ -87,10 +89,15 @@ export class TaskScheduler extends EventEmitter {
       const provider = this.registry.get(sel.model.provider_id);
       if (!provider) { console.warn(`[cron] Provider ${sel.model.provider_id} not found`); return; }
 
-      const systemPrompt = await buildSystemPrompt(task.group_id);
+      // Extract sender JID from group_id for cron context (stored as senderId when task was created)
+      const senderJid = task.group_id.includes('@') ? task.group_id : undefined;
+      const systemPrompt = await buildSystemPrompt(task.group_id, undefined, {
+        senderId: senderJid,
+        channel: 'whatsapp',
+      });
       const response = await agentLoop(
         [{ role: 'user', content: `[SCHEDULED TASK: ${task.name}]\n${task.instruction}` }],
-        { provider, model: sel.model, systemPrompt, db: this.db, groupId: task.group_id },
+        { provider, model: sel.model, systemPrompt, db: this.db, groupId: task.group_id, whatsappSend: this.whatsappSend },
       );
 
       if (response && this.onMessage) {

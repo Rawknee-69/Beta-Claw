@@ -81,7 +81,7 @@ const GeminiResponseSchema = z.object({
           }).optional(),
         })),
         role: z.string(),
-      }),
+      }).optional(),
       finishReason: z.string().optional(),
     }),
   ),
@@ -146,12 +146,14 @@ class GoogleAdapter implements IProviderAdapter {
       throw new Error('Google returned empty candidates');
     }
 
-    const content = candidate.content.parts
+    const parts = candidate.content?.parts ?? [];
+
+    const content = parts
       .filter(p => p.text !== undefined)
       .map(p => p.text!)
       .join('');
 
-    const toolCalls = candidate.content.parts
+    const toolCalls = parts
       .filter(p => p.functionCall !== undefined)
       .map(p => ({
         id: `fc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -212,7 +214,7 @@ class GoogleAdapter implements IProviderAdapter {
           try {
             const chunk = GeminiResponseSchema.parse(JSON.parse(data));
             const candidate = chunk.candidates[0];
-            const content = candidate?.content.parts.map((p) => p.text ?? '').join('') ?? '';
+            const content = candidate?.content?.parts.map((p) => p.text ?? '').join('') ?? '';
             const isDone =
               candidate?.finishReason === 'STOP' || candidate?.finishReason === 'MAX_TOKENS';
 
@@ -275,13 +277,26 @@ class GoogleAdapter implements IProviderAdapter {
     const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
 
     for (const msg of req.messages) {
+      // Skip empty messages to avoid Gemini API errors
+      if (!msg.content || msg.content.trim() === '') continue;
       contents.push({
         role: msg.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: msg.content }],
       });
     }
 
-    const body: Record<string, unknown> = { contents };
+    // Gemini requires alternating user/model turns; merge consecutive same-role messages
+    const merged: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+    for (const turn of contents) {
+      const prev = merged[merged.length - 1];
+      if (prev && prev.role === turn.role) {
+        prev.parts.push(...turn.parts);
+      } else {
+        merged.push({ role: turn.role, parts: [...turn.parts] });
+      }
+    }
+
+    const body: Record<string, unknown> = { contents: merged };
 
     if (req.systemPrompt) {
       body['systemInstruction'] = { parts: [{ text: req.systemPrompt }] };

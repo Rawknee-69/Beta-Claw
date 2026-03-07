@@ -12,7 +12,7 @@ const SkillInfoSchema = z.object({
 type SkillInfo = z.infer<typeof SkillInfoSchema>;
 
 function getSkillsDir(): string {
-  return path.resolve('.claude', 'skills');
+  return path.resolve('skills');
 }
 
 function listSkills(): void {
@@ -126,7 +126,7 @@ skillsCommand
 
 skillsCommand
   .command('install')
-  .description('Copy skill folder into .claude/skills/')
+  .description('Copy skill folder into skills/')
   .argument('<path>', 'Path to skill folder')
   .action((skillPath: string) => {
     installSkill(skillPath);

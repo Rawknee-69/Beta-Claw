@@ -10,6 +10,7 @@ import { selectModel } from './model-selector.js';
 import { agentLoop } from './agent-loop.js';
 import { buildSystemPrompt } from './prompt-builder.js';
 import { TaskScheduler } from '../scheduler/task-scheduler.js';
+import { SkillWatcher } from './skill-watcher.js';
 import pino from 'pino';
 
 interface OrchestratorEvent {
@@ -41,6 +42,7 @@ class Orchestrator extends EventEmitter {
   private readonly providers: Map<string, IProviderAdapter> = new Map();
   private readonly registry: ProviderRegistry = new ProviderRegistry();
   private readonly groupLocks = new Map<string, Promise<void>>();
+  private readonly skillWatcher: SkillWatcher = new SkillWatcher();
   private catalog: ModelEntry[] = [];
   private scheduler: TaskScheduler | null = null;
   private running = false;
@@ -61,6 +63,7 @@ class Orchestrator extends EventEmitter {
     this.running = true;
     this.logger.info({ profile: this.config.profile }, 'Orchestrator starting');
 
+    this.skillWatcher.watch();
     const availableProviderIds = new Set(this.registry.listIds());
     this.catalog = DEFAULT_CATALOG.filter(m => availableProviderIds.has(m.provider_id));
 
@@ -71,7 +74,12 @@ class Orchestrator extends EventEmitter {
       await channel.connect();
     }
 
-    this.scheduler = new TaskScheduler(this.db, this.registry, this.catalog, async (groupId, text) => {
+    const whatsappCh = this.channels.get('whatsapp');
+    const schedulerWhatsappSend = whatsappCh
+      ? (to: string, message: string) => whatsappCh.send({ groupId: to, content: message })
+      : undefined;
+
+    this.scheduler = new TaskScheduler(this.db, this.registry, this.catalog, schedulerWhatsappSend, async (groupId, text) => {
       const prefix = groupId.split('_')[0] ?? '';
       const targetChannel = Array.from(this.channels.values()).find(c =>
         (prefix === 'tg' && c.id === 'telegram') ||
@@ -92,6 +100,7 @@ class Orchestrator extends EventEmitter {
     this.logger.info('Orchestrator shutting down');
 
     this.scheduler?.stop();
+    this.skillWatcher.close();
 
     for (const [, channel] of this.channels) {
       await channel.disconnect();
@@ -138,6 +147,8 @@ class Orchestrator extends EventEmitter {
     const existing = this.groupLocks.get(msg.groupId) ?? Promise.resolve();
     const next = existing.then(async () => {
       try {
+        // Show typing indicator while the agent is thinking
+        await channel.sendTyping?.(msg.senderId).catch(() => {});
         const response = await this.handleMessage(msg, channel);
         await channel.send({ groupId: msg.groupId, content: response });
       } catch (e) {
@@ -179,7 +190,18 @@ class Orchestrator extends EventEmitter {
     const provider = this.registry.get(sel.model.provider_id);
     if (!provider) return `Provider ${sel.model.provider_id} not connected.`;
 
-    const systemPrompt = await buildSystemPrompt(msg.groupId);
+    const skills = this.skillWatcher.listSkills();
+    const systemPrompt = await buildSystemPrompt(msg.groupId, skills, {
+      senderId: msg.senderId,
+      channel: channel.id,
+    });
+
+    const whatsappChannel = this.channels.get('whatsapp');
+    const whatsappSend = whatsappChannel
+      ? async (to: string, message: string) => {
+          await whatsappChannel.send({ groupId: to, content: message });
+        }
+      : undefined;
 
     const response = await agentLoop(messages, {
       provider,
@@ -187,7 +209,10 @@ class Orchestrator extends EventEmitter {
       systemPrompt,
       db: this.db,
       groupId: msg.groupId,
+      senderId: msg.senderId,
       onToolCall: (name) => this.logger.info({ tool: name }, 'Tool called'),
+      onCronChange: () => this.scheduler?.refresh(),
+      whatsappSend,
     });
 
     const responseId = randomUUID();
@@ -200,8 +225,6 @@ class Orchestrator extends EventEmitter {
       channel: channel.id,
       processed: 1,
     });
-
-    this.scheduler?.refresh();
 
     return response;
   }

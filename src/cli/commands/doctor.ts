@@ -65,7 +65,7 @@ function checkProviders(): CheckResult {
 }
 
 function checkSkills(): CheckResult {
-  const dir = '.claude/skills';
+  const dir = 'skills';
   if (!fs.existsSync(dir)) {
     return { name: 'Skills', status: 'warn', detail: 'No skills directory' };
   }

@@ -1,7 +1,7 @@
 import type { IProviderAdapter, CompletionResponse } from '../providers/interface.js';
 import type { ModelEntry } from './model-catalog.js';
 import { TOOLS } from './tools.js';
-import { ToolExecutor } from './tool-executor.js';
+import { ToolExecutor, type WhatsAppSendFn } from './tool-executor.js';
 import { trimHistory, type Message } from './token-budget.js';
 import type { MicroClawDB } from '../db.js';
 
@@ -11,14 +11,17 @@ export interface LoopConfig {
   systemPrompt: string;
   db: MicroClawDB;
   groupId: string;
+  senderId?: string;
   onToolCall?: (name: string) => void;
+  onCronChange?: () => void;
   maxIterations?: number;
+  whatsappSend?: WhatsAppSendFn;
 }
 
 interface ToolCall { name: string; args: Record<string, unknown> }
 
 export async function agentLoop(messages: Message[], cfg: LoopConfig): Promise<string> {
-  const exec = new ToolExecutor(cfg.db, cfg.groupId);
+  const exec = new ToolExecutor(cfg.db, cfg.groupId, process.cwd(), cfg.whatsappSend, cfg.senderId, cfg.onCronChange);
   const max = cfg.maxIterations ?? 8;
   let hist = [...messages];
 

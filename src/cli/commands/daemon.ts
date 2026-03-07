@@ -3,6 +3,7 @@ import { fork, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import dotenv from 'dotenv';
 
 const PID_FILE = path.join('.micro', 'microclaw.pid');
 const LOG_FILE = path.join('.micro', 'logs', 'app.log');
@@ -67,43 +68,72 @@ async function startDaemon(options: { foreground?: boolean }): Promise<void> {
   ensureDirs();
 
   if (options.foreground) {
+    dotenv.config();
     console.log('MicroClaw v2.0 — Starting in foreground mode...');
     writePid(process.pid);
 
     const { MicroClawDB } = await import('../../db.js');
     const { Orchestrator } = await import('../../core/orchestrator.js');
     const { ProviderRegistry } = await import('../../core/provider-registry.js');
-    const { ModelCatalog } = await import('../../core/model-catalog.js');
-    const { SkillWatcher } = await import('../../core/skill-watcher.js');
-    const { TaskScheduler } = await import('../../scheduler/task-scheduler.js');
+    const { registerAvailableProviders } = await import('../../core/provider-init.js');
+    const { WhatsAppChannel } = await import('../../channels/whatsapp.js');
+    const { TelegramChannel } = await import('../../channels/telegram.js');
+    const { DiscordChannel } = await import('../../channels/discord.js');
 
     const db = new MicroClawDB('microclaw.db');
-    const registry = new ProviderRegistry();
-    const catalog = new ModelCatalog(db, registry);
     const orchestrator = new Orchestrator();
-    const skillWatcher = new SkillWatcher();
-    const scheduler = new TaskScheduler(db, registry);
 
-    skillWatcher.watch();
-    scheduler.start();
-    await catalog.refreshAll();
+    // Register all available AI providers from environment
+    const sharedRegistry = new ProviderRegistry();
+    const registered = registerAvailableProviders(sharedRegistry);
+    for (const id of sharedRegistry.listIds()) {
+      const p = sharedRegistry.get(id);
+      if (p) orchestrator.registerProvider(p);
+    }
+    console.log(`  Providers: ${registered.length > 0 ? registered.join(', ') : 'none'}`);
+
+    // Register channels based on environment variables / config
+    if (process.env['WHATSAPP_ENABLED'] === 'true' || fs.existsSync('.micro/whatsapp-auth')) {
+      const wa = new WhatsAppChannel();
+      orchestrator.registerChannel(wa);
+      console.log('  Channel: WhatsApp');
+    }
+
+    if (process.env['TELEGRAM_BOT_TOKEN']) {
+      try {
+        const tg = new TelegramChannel();
+        orchestrator.registerChannel(tg);
+        console.log('  Channel: Telegram');
+      } catch {
+        // Telegram not available
+      }
+    }
+
+    if (process.env['DISCORD_BOT_TOKEN']) {
+      try {
+        const dc = new DiscordChannel();
+        orchestrator.registerChannel(dc);
+        console.log('  Channel: Discord');
+      } catch {
+        // Discord not available
+      }
+    }
+
     await orchestrator.start();
 
-    console.log('MicroClaw daemon running. Press Ctrl+C to stop.\n');
+    console.log('\nMicroClaw daemon running. Press Ctrl+C to stop.\n');
 
-    const shutdown = (): void => {
+    const shutdown = async (): Promise<void> => {
       console.log('\nShutting down...');
-      orchestrator.stop();
-      scheduler.stop();
-      skillWatcher.close();
+      await orchestrator.stop();
       db.close();
       removePid();
       console.log('MicroClaw stopped.');
       process.exit(0);
     };
 
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', () => { void shutdown(); });
+    process.on('SIGTERM', () => { void shutdown(); });
     return;
   }
 
@@ -215,7 +245,7 @@ function showStatus(): void {
 
   console.log(`  Providers: ${providers.length > 0 ? providers.join(', ') : 'none configured'}`);
 
-  const skillsDir = '.claude/skills';
+  const skillsDir = 'skills';
   let skillCount = 0;
   try {
     const entries = fs.readdirSync(skillsDir, { withFileTypes: true });

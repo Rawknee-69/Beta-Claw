@@ -6,6 +6,8 @@ import type { IChannel, InboundMessage, OutboundMessage, ChannelFeature } from '
 type MessageHandler = (msg: InboundMessage) => void | Promise<void>;
 
 const AUTH_DIR = '.micro/whatsapp-auth';
+// Trigger word is only required in GROUP chats to avoid responding to every message.
+// In DMs (1-on-1) every message is processed without needing a trigger.
 const TRIGGER = process.env['TRIGGER_WORD'] ?? '@Andy';
 
 const SUPPORTED_FEATURES: ReadonlySet<ChannelFeature> = new Set([
@@ -41,19 +43,39 @@ export class WhatsAppChannel implements IChannel {
       const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
       const { version } = await fetchLatestBaileysVersion();
 
+      // Use pino with level 'silent' — Baileys requires a real pino-compatible logger
+      const pino = (await import('pino')).default;
+      const silentLogger = pino({ level: 'silent' });
+
+      // Do NOT use printQRInTerminal — it is deprecated. We render QR ourselves.
       const sock: any = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: true,
+        logger: silentLogger,
       });
 
       this.sock = sock;
 
       sock.ev.on('creds.update', saveCreds);
 
-      sock.ev.on('connection.update', (update: any) => {
-        if (update.qr) console.log('[whatsapp] Scan QR code to connect');
+      sock.ev.on('connection.update', async (update: any) => {
+        if (update.qr) {
+          try {
+            const qrTerminalMod = await import('qrcode-terminal');
+            const qrTerminal = (qrTerminalMod.default ?? qrTerminalMod) as { generate: (qr: string, opts: { small: boolean }) => void };
+            console.log('\n[whatsapp] Scan this QR code with WhatsApp → Linked Devices → Link a Device:\n');
+            qrTerminal.generate(update.qr as string, { small: true });
+            console.log('\n[whatsapp] Waiting for scan...\n');
+          } catch {
+            console.log('[whatsapp] QR code available — install qrcode-terminal to display it, or use microclaw setup to pair.');
+          }
+        }
+        if (update.connection === 'open') {
+          this.connected = true;
+          console.log('[whatsapp] Connected');
+        }
         if (update.connection === 'close') {
+          this.connected = false;
           const statusCode = update.lastDisconnect?.error?.output?.statusCode;
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
           if (shouldReconnect) {
@@ -62,10 +84,6 @@ export class WhatsAppChannel implements IChannel {
           } else {
             console.log('[whatsapp] Logged out. Delete .micro/whatsapp-auth and restart.');
           }
-        }
-        if (update.connection === 'open') {
-          this.connected = true;
-          console.log('[whatsapp] Connected');
         }
       });
 
@@ -77,9 +95,15 @@ export class WhatsAppChannel implements IChannel {
             msg.message.conversation ??
             msg.message.extendedTextMessage?.text ??
             '';
-          if (!text.includes(TRIGGER)) continue;
+          if (!text) continue;
 
-          const content = text.replace(TRIGGER, '').trim();
+          const remoteJid: string = msg.key.remoteJid ?? '';
+          const isGroupChat = remoteJid.endsWith('@g.us');
+
+          // In group chats require the trigger word; in DMs respond to everything
+          if (isGroupChat && !text.includes(TRIGGER)) continue;
+
+          const content = isGroupChat ? text.replace(TRIGGER, '').trim() : text.trim();
           const groupId: string = msg.key.remoteJid ?? 'default';
           const senderId: string = msg.key.participant ?? msg.key.remoteJid ?? 'unknown';
           const ts: number = typeof msg.messageTimestamp === 'number'
@@ -101,8 +125,8 @@ export class WhatsAppChannel implements IChannel {
       });
       /* eslint-enable */
 
-      this.connected = true;
-      this.emitter.emit('connected');
+      // connected flag is set in connection.update → 'open', not here
+      this.emitter.emit('connecting');
     } catch {
       console.warn('[whatsapp] @whiskeysockets/baileys not available or failed to connect. Channel disabled.');
       this.connected = false;
@@ -110,14 +134,15 @@ export class WhatsAppChannel implements IChannel {
   }
 
   async disconnect(): Promise<void> {
-    if (!this.connected) return;
+    this.connected = false;
     try {
-      if (this.sock && typeof (this.sock as Record<string, unknown>)['logout'] === 'function') {
-        await (this.sock as Record<string, (...a: unknown[]) => Promise<void>>)['logout']!();
+      // Use end() to cleanly close the socket WITHOUT logging out from WhatsApp.
+      // logout() removes the linked device permanently and requires re-scanning the QR.
+      if (this.sock && typeof (this.sock as Record<string, unknown>)['end'] === 'function') {
+        (this.sock as Record<string, (...a: unknown[]) => void>)['end']!();
       }
     } catch { /* ignore */ }
     this.sock = null;
-    this.connected = false;
     this.emitter.emit('disconnected');
   }
 
@@ -137,6 +162,15 @@ export class WhatsAppChannel implements IChannel {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  async sendTyping(jid: string): Promise<void> {
+    if (!this.sock) return;
+    try {
+      /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+      await (this.sock as any).sendPresenceUpdate('composing', jid);
+      /* eslint-enable */
+    } catch { /* non-fatal */ }
   }
 
   handleIncomingMessage(rawJid: string, rawContent: string, groupId?: string): void {
