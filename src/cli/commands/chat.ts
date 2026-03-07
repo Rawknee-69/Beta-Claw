@@ -390,13 +390,19 @@ async function startChat(options: ChatOptions): Promise<void> {
         const nodes = buildDAGNodes(planBlock);
 
         if (nodes.length > 0) {
+          const completedResults = new Map<string, string>();
+
           agentResults = await executeDAG(nodes, async (node) => {
             const agent = agentMap[node.agentType];
             if (!agent) return encode('error', { msg: `Unknown agent: ${node.agentType}` });
 
             let brief = node.brief;
             if (node.agentType === 'composer') {
-              brief = `User asked: ${safeInput}\nResearch: ${agentResults?.get(nodes.find(n => n.agentType === 'research')?.id ?? '') ?? ''}`;
+              const parts: string[] = [`User asked: ${safeInput}`];
+              for (const [, output] of completedResults) {
+                parts.push(output);
+              }
+              brief = parts.join('\n');
             }
 
             const result = await agent.execute({
@@ -406,6 +412,7 @@ async function startChat(options: ChatOptions): Promise<void> {
               groupId,
               sessionId,
             });
+            completedResults.set(node.id, result.output);
             return result.output;
           });
         } else {
@@ -415,8 +422,16 @@ async function startChat(options: ChatOptions): Promise<void> {
         agentResults = new Map();
       }
 
+      // Find composer output from DAG results (node ID may be 'step_N', not 'composer')
+      let composerNodeId: string | undefined;
+      if (planBlock?.data['steps'] && Array.isArray(planBlock.data['steps'])) {
+        const nodes = buildDAGNodes(planBlock);
+        composerNodeId = nodes.find(n => n.agentType === 'composer')?.id;
+      }
+      const dagComposerOutput = composerNodeId ? agentResults.get(composerNodeId) : agentResults.get('composer');
+
       // If no composer ran via DAG, run the simple research+compose cycle
-      if (!agentResults.has('composer')) {
+      if (!dagComposerOutput) {
         const researchAgent = new ResearchAgent();
         const composerAgent = new ComposerAgent();
 
@@ -439,7 +454,7 @@ async function startChat(options: ChatOptions): Promise<void> {
       }
 
       // 7. GET FINAL RESPONSE
-      const composerOutput = agentResults.get('composer') ?? '';
+      const composerOutput = dagComposerOutput ?? agentResults.get('composer') ?? '';
       let finalResponse = extractHumanResponse(composerOutput);
       if (!finalResponse) finalResponse = composerOutput;
 
