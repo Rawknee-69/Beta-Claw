@@ -73,7 +73,13 @@ const GeminiResponseSchema = z.object({
   candidates: z.array(
     z.object({
       content: z.object({
-        parts: z.array(z.object({ text: z.string().optional() })),
+        parts: z.array(z.object({
+          text: z.string().optional(),
+          functionCall: z.object({
+            name: z.string(),
+            args: z.record(z.unknown()),
+          }).optional(),
+        })),
         role: z.string(),
       }),
       finishReason: z.string().optional(),
@@ -140,7 +146,18 @@ class GoogleAdapter implements IProviderAdapter {
       throw new Error('Google returned empty candidates');
     }
 
-    const content = candidate.content.parts.map((p) => p.text ?? '').join('');
+    const content = candidate.content.parts
+      .filter(p => p.text !== undefined)
+      .map(p => p.text!)
+      .join('');
+
+    const toolCalls = candidate.content.parts
+      .filter(p => p.functionCall !== undefined)
+      .map(p => ({
+        id: `fc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name: p.functionCall!.name,
+        arguments: p.functionCall!.args as Record<string, unknown>,
+      }));
 
     return {
       content,
@@ -151,6 +168,7 @@ class GoogleAdapter implements IProviderAdapter {
         totalTokens: parsed.usageMetadata?.totalTokenCount ?? 0,
       },
       finishReason: this.mapFinishReason(candidate.finishReason),
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     };
   }
 
@@ -282,7 +300,7 @@ class GoogleAdapter implements IProviderAdapter {
           functionDeclarations: req.tools.map((t) => ({
             name: t.name,
             description: t.description,
-            parameters: t.parameters,
+            parameters: t.input_schema,
           })),
         },
       ];

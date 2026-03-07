@@ -82,7 +82,7 @@ async function startDaemon(options: { foreground?: boolean }): Promise<void> {
     const catalog = new ModelCatalog(db, registry);
     const orchestrator = new Orchestrator();
     const skillWatcher = new SkillWatcher();
-    const scheduler = new TaskScheduler(db);
+    const scheduler = new TaskScheduler(db, registry);
 
     skillWatcher.watch();
     scheduler.start();

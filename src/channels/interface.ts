@@ -38,7 +38,7 @@ interface IChannel {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   send(msg: OutboundMessage): Promise<void>;
-  onMessage(handler: (msg: InboundMessage) => void): void;
+  onMessage(handler: (msg: InboundMessage) => void | Promise<void>): void;
   supportsFeature(f: ChannelFeature): boolean;
 }
 

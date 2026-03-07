@@ -1,8 +1,15 @@
 import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { MicroClawDB } from '../db.js';
 import type { ResourceProfile } from '../db.js';
 import type { IChannel, InboundMessage } from '../channels/interface.js';
 import type { IProviderAdapter } from '../providers/interface.js';
+import { ProviderRegistry } from './provider-registry.js';
+import { DEFAULT_CATALOG, type ModelEntry } from './model-catalog.js';
+import { selectModel } from './model-selector.js';
+import { agentLoop } from './agent-loop.js';
+import { buildSystemPrompt } from './prompt-builder.js';
+import { TaskScheduler } from '../scheduler/task-scheduler.js';
 import pino from 'pino';
 
 interface OrchestratorEvent {
@@ -32,7 +39,10 @@ class Orchestrator extends EventEmitter {
   private readonly logger: pino.Logger;
   private readonly channels: Map<string, IChannel> = new Map();
   private readonly providers: Map<string, IProviderAdapter> = new Map();
-  private activeGroups = 0;
+  private readonly registry: ProviderRegistry = new ProviderRegistry();
+  private readonly groupLocks = new Map<string, Promise<void>>();
+  private catalog: ModelEntry[] = [];
+  private scheduler: TaskScheduler | null = null;
   private running = false;
 
   constructor(config: Partial<OrchestratorConfig> = {}) {
@@ -51,18 +61,37 @@ class Orchestrator extends EventEmitter {
     this.running = true;
     this.logger.info({ profile: this.config.profile }, 'Orchestrator starting');
 
+    const availableProviderIds = new Set(this.registry.listIds());
+    this.catalog = DEFAULT_CATALOG.filter(m => availableProviderIds.has(m.provider_id));
+
     for (const [, channel] of this.channels) {
+      channel.onMessage((msg: InboundMessage) => {
+        this.enqueue(msg, channel);
+      });
       await channel.connect();
     }
 
+    this.scheduler = new TaskScheduler(this.db, this.registry, this.catalog, async (groupId, text) => {
+      const prefix = groupId.split('_')[0] ?? '';
+      const targetChannel = Array.from(this.channels.values()).find(c =>
+        (prefix === 'tg' && c.id === 'telegram') ||
+        (prefix === 'dc' && c.id === 'discord') ||
+        (c.id === 'whatsapp'),
+      );
+      await targetChannel?.send({ groupId, content: text });
+    });
+    this.scheduler.start();
+
     this.processPendingIpc();
-    this.logger.info('Orchestrator started — purely event-driven');
+    this.logger.info('Orchestrator started — event-driven with agent loop');
   }
 
   async stop(): Promise<void> {
     if (!this.running) return;
     this.running = false;
     this.logger.info('Orchestrator shutting down');
+
+    this.scheduler?.stop();
 
     for (const [, channel] of this.channels) {
       await channel.disconnect();
@@ -80,19 +109,12 @@ class Orchestrator extends EventEmitter {
 
   registerChannel(channel: IChannel): void {
     this.channels.set(channel.id, channel);
-    channel.onMessage((msg: InboundMessage) => {
-      this.emit('event', {
-        type: 'message',
-        groupId: msg.groupId,
-        payload: msg,
-        timestamp: Date.now(),
-      } satisfies OrchestratorEvent);
-    });
     this.logger.info({ channelId: channel.id }, 'Channel registered');
   }
 
   registerProvider(provider: IProviderAdapter): void {
     this.providers.set(provider.id, provider);
+    this.registry.register(provider);
     this.logger.info({ providerId: provider.id }, 'Provider registered');
   }
 
@@ -112,21 +134,90 @@ class Orchestrator extends EventEmitter {
     return this.running;
   }
 
+  private enqueue(msg: InboundMessage, channel: IChannel): void {
+    const existing = this.groupLocks.get(msg.groupId) ?? Promise.resolve();
+    const next = existing.then(async () => {
+      try {
+        const response = await this.handleMessage(msg, channel);
+        await channel.send({ groupId: msg.groupId, content: response });
+      } catch (e) {
+        this.logger.error({ err: e, groupId: msg.groupId }, 'Error processing message');
+        await channel.send({ groupId: msg.groupId, content: `Error: ${e instanceof Error ? e.message : String(e)}` }).catch(() => {});
+      }
+    });
+    this.groupLocks.set(msg.groupId, next);
+    next.finally(() => {
+      if (this.groupLocks.get(msg.groupId) === next) this.groupLocks.delete(msg.groupId);
+    });
+  }
+
+  private async handleMessage(msg: InboundMessage, channel: IChannel): Promise<string> {
+    this.db.insertMessage({
+      id: msg.id,
+      group_id: msg.groupId,
+      sender_id: msg.senderId,
+      content: msg.content,
+      timestamp: msg.timestamp,
+      channel: channel.id,
+      reply_to_id: msg.replyToId ?? null,
+      processed: 0,
+      error: null,
+      content_redacted: null,
+    });
+
+    this.db.updateGroupLastActive(msg.groupId);
+
+    const history = this.db.getMessages(msg.groupId, 20);
+    const messages = history.map(m => ({
+      role: (m.sender_id === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+      content: m.content,
+    }));
+
+    const sel = selectModel(this.catalog, msg.content);
+    if (!sel) return 'No model available. Run `microclaw provider add`.';
+
+    const provider = this.registry.get(sel.model.provider_id);
+    if (!provider) return `Provider ${sel.model.provider_id} not connected.`;
+
+    const systemPrompt = await buildSystemPrompt(msg.groupId);
+
+    const response = await agentLoop(messages, {
+      provider,
+      model: sel.model,
+      systemPrompt,
+      db: this.db,
+      groupId: msg.groupId,
+      onToolCall: (name) => this.logger.info({ tool: name }, 'Tool called'),
+    });
+
+    const responseId = randomUUID();
+    this.db.insertMessage({
+      id: responseId,
+      group_id: msg.groupId,
+      sender_id: 'assistant',
+      content: response,
+      timestamp: Date.now(),
+      channel: channel.id,
+      processed: 1,
+    });
+
+    this.scheduler?.refresh();
+
+    return response;
+  }
+
   private async handleEvent(event: OrchestratorEvent): Promise<void> {
     if (!this.running && event.type !== 'shutdown') return;
 
     switch (event.type) {
-      case 'message':
-        await this.handleMessage(event);
-        break;
       case 'scheduled_task':
-        await this.handleScheduledTask(event);
+        this.logger.info('Scheduled task handled via TaskScheduler');
         break;
       case 'webhook':
-        await this.handleWebhook(event);
+        this.logger.info('Webhook handling (placeholder)');
         break;
       case 'ipc':
-        await this.handleIpc(event);
+        this.logger.info('IPC handling (placeholder)');
         break;
       case 'skill_reload':
         this.logger.info('Skills reloaded');
@@ -134,55 +225,9 @@ class Orchestrator extends EventEmitter {
       case 'shutdown':
         this.logger.info('Shutdown event received');
         break;
+      case 'message':
+        break;
     }
-  }
-
-  private async handleMessage(event: OrchestratorEvent): Promise<void> {
-    if (this.activeGroups >= this.config.maxConcurrentGroups) {
-      this.logger.warn({ groupId: event.groupId }, 'Max concurrent groups reached, queuing');
-      return;
-    }
-
-    this.activeGroups++;
-    try {
-      const msg = event.payload as InboundMessage;
-      this.logger.info({ groupId: msg.groupId, senderId: msg.senderId }, 'Processing message');
-
-      this.db.insertMessage({
-        id: msg.id,
-        group_id: msg.groupId,
-        sender_id: msg.senderId,
-        content: msg.content,
-        timestamp: msg.timestamp,
-        channel: this.getChannelForGroup(msg.groupId),
-        reply_to_id: msg.replyToId ?? null,
-        processed: 0,
-        error: null,
-        content_redacted: null,
-      });
-
-      this.db.updateGroupLastActive(msg.groupId);
-
-      // Placeholder: in later phases, this routes to the planner agent
-      // via DAG execution. For now, just mark as processed.
-      this.db.markMessageProcessed(msg.id);
-    } catch (err) {
-      this.logger.error({ err, groupId: event.groupId }, 'Error processing message');
-    } finally {
-      this.activeGroups--;
-    }
-  }
-
-  private async handleScheduledTask(_event: OrchestratorEvent): Promise<void> {
-    this.logger.info('Scheduled task handling (placeholder)');
-  }
-
-  private async handleWebhook(_event: OrchestratorEvent): Promise<void> {
-    this.logger.info('Webhook handling (placeholder)');
-  }
-
-  private async handleIpc(_event: OrchestratorEvent): Promise<void> {
-    this.logger.info('IPC handling (placeholder)');
   }
 
   private processPendingIpc(): void {
@@ -195,11 +240,6 @@ class Orchestrator extends EventEmitter {
       } satisfies OrchestratorEvent);
       this.db.markIpcProcessed(msg.id);
     }
-  }
-
-  private getChannelForGroup(groupId: string): string {
-    const group = this.db.getGroup(groupId);
-    return group?.channel ?? 'cli';
   }
 }
 

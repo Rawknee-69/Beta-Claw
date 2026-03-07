@@ -10,9 +10,9 @@ import type {
 } from './interface.js';
 
 const ANTHROPIC_MODELS = [
-  { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', contextWindow: 200000, inputCost: 3.0, outputCost: 15.0, tier: 'pro' },
-  { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', contextWindow: 200000, inputCost: 15.0, outputCost: 75.0, tier: 'max' },
-  { id: 'claude-haiku-3-5-20241022', name: 'Claude 3.5 Haiku', contextWindow: 200000, inputCost: 0.80, outputCost: 4.0, tier: 'standard' },
+  { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', contextWindow: 200000, inputCost: 0.80, outputCost: 4.0, tier: 'nano' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', contextWindow: 200000, inputCost: 3.0, outputCost: 15.0, tier: 'standard' },
+  { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', contextWindow: 200000, inputCost: 5.0, outputCost: 25.0, tier: 'pro' },
 ] as const;
 
 const AnthropicResponseSchema = z.object({
@@ -291,7 +291,7 @@ class AnthropicAdapter implements IProviderAdapter {
       body['tools'] = req.tools.map((t) => ({
         name: t.name,
         description: t.description,
-        input_schema: t.parameters,
+        input_schema: t.input_schema,
       }));
     }
 

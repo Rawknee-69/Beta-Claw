@@ -11,7 +11,7 @@ platforms:
   - linux
   - macos
   - windows
-version: 1.0.0
+version: 2.0.0
 author: microclaw
 ---
 
@@ -60,74 +60,73 @@ Store the selection in `.micro/config.toon`.
 
 ## Phase 3: Provider API Key Configuration
 
-1. Ask the user which AI providers they want to configure. Present the full list:
-   - Anthropic (Claude family)
-   - OpenAI (GPT + o-series)
-   - Google (Gemini family)
+1. Ask the user which AI providers they want to configure. Support **multiple selections**. Present the full list:
    - OpenRouter (200+ models via single key — recommended)
+   - Anthropic (Claude Haiku 4.5, Sonnet 4.6, Opus 4.6)
+   - Google (Gemini 2.5 Flash/Pro, 3.1 Pro Preview)
+   - OpenAI (GPT-4o, o3, GPT-5)
    - Groq (ultra-fast inference)
-   - Mistral AI
-   - Cohere
-   - Together AI
+   - DeepSeek (DeepSeek V3, R1 reasoning — very cheap)
+   - Mistral AI (Mistral Large 2, Devstral 2 — EU-hosted)
+   - Cohere (Command R+, Embed — enterprise RAG)
+   - Together AI (Open-source models, fast inference)
+   - Perplexity AI (Search-grounded responses)
    - Ollama (local, no key needed)
    - LM Studio (local, no key needed)
-   - Perplexity AI
-   - DeepSeek
 
-2. For each selected provider, prompt the user for their API key.
-3. Store all keys securely in the encrypted vault (`.micro/vault.enc`), never in `.env` or plain text.
-4. Set the user's preferred default provider.
+2. For each selected provider, prompt the user for their API key. Validate key prefixes where known.
+3. Store all keys in `.env` (for immediate use) and optionally in the encrypted vault (`.micro/vault.enc`).
+4. Support configuring multiple providers in one pass.
 
-## Phase 4: Connectivity Test
+## Phase 4: Web Search Setup (Optional)
+
+Ask if the user wants web search capabilities:
+- **Brave Search**: prompt for `BRAVE_API_KEY`, store in `.env`
+- **Serper**: prompt for `SERPER_API_KEY`, store in `.env`
+- **Both**: configure Brave as primary, Serper as fallback
+- **Skip**: disable web search tool
+
+## Phase 5: Channel Setup (Optional)
+
+1. CLI is always enabled. Ask which messaging channels to add:
+   - **Telegram** — Requires `TELEGRAM_BOT_TOKEN` from @BotFather
+   - **Discord** — Requires `DISCORD_BOT_TOKEN` from discord.com/developers
+   - **WhatsApp** — QR code pairing via Baileys on first start
+2. For Telegram/Discord: prompt for bot token, store in `.env`.
+3. For WhatsApp: inform user QR pairing happens on first `microclaw start`.
+
+## Phase 6: Persona Configuration
+
+1. Ask the user to choose a communication style:
+   - **Concise** — Short, direct answers. No fluff.
+   - **Detailed** — Thorough explanations with context.
+   - **Technical** — Assumes expertise, uses jargon freely.
+   - **Casual** — Relaxed, conversational, friendly.
+2. Collect:
+   - **Name**: The bot's name (default: "Andy")
+   - **Language**: Primary language for responses (default: "English")
+   - **Trigger word**: For group chats (default: "@{name}")
+3. Write the persona to `groups/default/SOUL.md` (and any other group SOUL.md files).
+4. Write group memory to `groups/default/CLAUDE.md`.
+
+## Phase 7: Connectivity Test & Finalize
 
 For each configured provider:
 1. Make a minimal API call (list models or a single-token completion).
 2. Report success or failure with clear error messages.
 3. If a provider fails, offer to re-enter the key or skip it.
 
-Populate the model catalog in SQLite by calling `fetchAvailableModels()` for each working provider.
-
-## Phase 5: Persona Configuration
-
-1. Ask the user if they want to set a custom persona or use the default.
-2. If custom, collect:
-   - **Name**: The bot's name (default: "Andy")
-   - **Tone**: e.g., "warm, friendly, concise" or "professional, detailed"
-   - **Language**: Primary language for responses
-   - **Never rules**: Things the persona should never do
-   - **Always rules**: Things the persona should always do
-3. Write the persona to `prompts/system/persona-template.toon` with the user's values interpolated.
-4. Compute the persona baseline embedding (5 synthetic examples) and store in SQLite for drift detection.
-
-## Phase 6: Channel Setup
-
-1. Ask which channels to enable:
-   - **CLI** (always enabled, no config needed)
-   - **WhatsApp** (requires QR code scan)
-   - **HTTP REST** (configure port, default 3000)
-   - Other channels available via `/add-telegram`, `/add-discord`, `/add-slack`, `/add-signal`
-2. For WhatsApp: initiate QR code auth flow via Baileys.
-3. For HTTP: write port config and generate HMAC signing secret.
-
-## Phase 7: Search Provider Setup (Optional)
-
-Ask if the user wants web search capabilities:
-- **Brave Search**: prompt for `BRAVE_API_KEY`, store in vault
-- **Serper**: prompt for `SERPER_API_KEY`, store in vault
-- Both can be configured for automatic fallback.
-
-## Phase 8: Finalize
-
+Then finalize:
 1. Write the complete `.micro/config.toon` with all settings.
-2. Initialize the SQLite database with the full schema from PRD Section 17.
+2. Initialize the SQLite database with the schema.
 3. Create the `groups/` directory structure.
 4. Run `microclaw doctor` equivalent checks to verify everything works.
 5. Display a summary:
    - Platform and profile
    - Execution mode
-   - Configured providers and default
-   - Active channels
-   - Search providers
-   - Persona name
+   - Configured providers
+   - Search providers (Brave/Serper)
+   - Active channels (CLI + any messaging)
+   - Persona name and style
 
-Tell the user: "MicroClaw is ready. Type a message to start chatting, or use `/status` to check system health."
+Tell the user: "MicroClaw is ready. Type `microclaw chat` to start, or `microclaw start` to launch with all channels."

@@ -295,7 +295,7 @@ class OpenRouterAdapter implements IProviderAdapter {
         function: {
           name: t.name,
           description: t.description,
-          parameters: t.parameters,
+          parameters: t.input_schema,
         },
       }));
     }

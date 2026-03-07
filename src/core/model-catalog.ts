@@ -1,9 +1,37 @@
 import type { MicroClawDB, ModelCatalogEntry } from '../db.js';
-import type { IProviderAdapter, ModelEntry } from '../providers/interface.js';
+import type { IProviderAdapter, ModelEntry as ProviderModel } from '../providers/interface.js';
 import type { ProviderRegistry } from './provider-registry.js';
 import pino from 'pino';
 
-type ModelTier = 'nano' | 'standard' | 'pro' | 'max';
+export type ModelTier = 'nano' | 'standard' | 'pro';
+
+export interface ModelEntry {
+  id: string;
+  provider_id: string;
+  tier: ModelTier;
+  contextTokens: number;
+  note?: string;
+}
+
+export const DEFAULT_CATALOG: ModelEntry[] = [
+  { id: 'claude-haiku-4-5-20251001',  provider_id: 'anthropic', tier: 'nano',     contextTokens: 200_000 },
+  { id: 'claude-sonnet-4-6',          provider_id: 'anthropic', tier: 'standard', contextTokens: 200_000 },
+  { id: 'claude-opus-4-6',            provider_id: 'anthropic', tier: 'pro',      contextTokens: 200_000, note: '1M ctx with beta header' },
+
+  { id: 'gemini-2.5-flash-lite',      provider_id: 'google',    tier: 'nano',     contextTokens: 1_000_000 },
+  { id: 'gemini-2.5-flash',           provider_id: 'google',    tier: 'standard', contextTokens: 1_000_000 },
+  { id: 'gemini-2.5-pro',             provider_id: 'google',    tier: 'pro',      contextTokens: 1_000_000 },
+  { id: 'gemini-3.1-pro-preview',     provider_id: 'google',    tier: 'pro',      contextTokens: 1_000_000, note: 'preview' },
+
+  { id: 'meta-llama/llama-3.1-8b-instruct',  provider_id: 'openrouter', tier: 'nano',     contextTokens: 128_000 },
+  { id: 'meta-llama/llama-4-maverick',        provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
+  { id: 'meta-llama/llama-3.3-70b-instruct',  provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
+  { id: 'deepseek/deepseek-chat-v3-0324',     provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
+  { id: 'mistralai/mistral-large-2',          provider_id: 'openrouter', tier: 'standard', contextTokens: 128_000 },
+  { id: 'mistralai/devstral-2',               provider_id: 'openrouter', tier: 'standard', contextTokens: 262_000, note: 'coding agent' },
+  { id: 'qwen/qwen3-235b-a22b',               provider_id: 'openrouter', tier: 'standard', contextTokens: 131_072 },
+  { id: 'deepseek/deepseek-r1',               provider_id: 'openrouter', tier: 'pro',      contextTokens: 128_000, note: 'reasoning/CoT' },
+];
 
 interface TierThresholds {
   nanoMaxCost: number;
@@ -113,8 +141,8 @@ class ModelCatalog {
     if (models.length === 0) return undefined;
 
     return models.sort((a, b) => {
-      const capA = a.capabilities ? JSON.parse(a.capabilities).length : 0;
-      const capB = b.capabilities ? JSON.parse(b.capabilities).length : 0;
+      const capA = a.capabilities ? (JSON.parse(a.capabilities) as string[]).length : 0;
+      const capB = b.capabilities ? (JSON.parse(b.capabilities) as string[]).length : 0;
       if (capA !== capB) return capB - capA;
       return (a.input_cost_per_1m ?? Infinity) - (b.input_cost_per_1m ?? Infinity);
     })[0];
@@ -139,15 +167,14 @@ class ModelCatalog {
     }
   }
 
-  private assignTier(model: ModelEntry): ModelTier {
+  private assignTier(model: ProviderModel): ModelTier {
     const avgCost = (model.inputCostPer1M + model.outputCostPer1M) / 2;
 
     if (avgCost <= this.thresholds.nanoMaxCost) return 'nano';
     if (avgCost <= this.thresholds.standardMaxCost) return 'standard';
-    if (avgCost <= this.thresholds.proMaxCost) return 'pro';
-    return 'max';
+    return 'pro';
   }
 }
 
 export { ModelCatalog, CATALOG_TTL_MS };
-export type { ModelTier, TierThresholds };
+export type { TierThresholds };

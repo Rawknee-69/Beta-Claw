@@ -4,6 +4,7 @@ import { MicroClawDB } from '../../db.js';
 import { ProviderRegistry } from '../../core/provider-registry.js';
 import { ModelCatalog } from '../../core/model-catalog.js';
 import { estimateComplexity } from '../../core/complexity-estimator.js';
+import type { ComplexityResult as _CR } from '../../core/complexity-estimator.js';
 import { PlannerAgent } from '../../agents/planner.js';
 import { ExecutionAgent } from '../../agents/execution.js';
 import { Guardrails } from '../../security/guardrails.js';

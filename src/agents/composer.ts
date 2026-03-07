@@ -1,10 +1,10 @@
 import { encode, decode, parseAll } from '../core/toon-serializer.js';
 import { PromptLoader } from '../core/prompt-loader.js';
 import { getConfig } from '../core/config-loader.js';
-import { estimateComplexity } from '../core/complexity-estimator.js';
+import { classifyTier } from '../core/complexity-estimator.js';
 import { selectModel } from '../core/model-selector.js';
 import type { ProviderRegistry } from '../core/provider-registry.js';
-import type { ModelCatalog } from '../core/model-catalog.js';
+import { DEFAULT_CATALOG, type ModelEntry } from '../core/model-catalog.js';
 import type { AgentTask, AgentResult, IAgent } from './types.js';
 import { AgentTaskSchema, AgentResultSchema } from './types.js';
 
@@ -32,14 +32,19 @@ export class ComposerAgent implements IAgent {
   readonly type = 'composer' as const;
 
   private static _registry: ProviderRegistry | null = null;
-  private static _catalog: ModelCatalog | null = null;
+  private static _catalog: ModelEntry[] | null = null;
 
   static setRegistry(registry: ProviderRegistry): void {
     ComposerAgent._registry = registry;
   }
 
-  static setCatalog(catalog: ModelCatalog): void {
-    ComposerAgent._catalog = catalog;
+  static setCatalog(catalog: { getAllModels?: () => unknown[] } | ModelEntry[]): void {
+    if (Array.isArray(catalog)) {
+      ComposerAgent._catalog = catalog;
+    } else {
+      const available = new Set(ComposerAgent._registry?.listIds() ?? []);
+      ComposerAgent._catalog = DEFAULT_CATALOG.filter(m => available.has(m.provider_id));
+    }
   }
 
   async execute(task: AgentTask): Promise<AgentResult> {
@@ -93,8 +98,8 @@ export class ComposerAgent implements IAgent {
         `User's request: ${userRequest}`;
     }
 
-    const complexity = estimateComplexity(userRequest);
-    const selection = selectModel(catalog, complexity);
+    void classifyTier(userRequest);
+    const selection = selectModel(catalog, userRequest);
 
     if (!selection) {
       const output = encode('composer_result', {
@@ -129,7 +134,7 @@ export class ComposerAgent implements IAgent {
       };
     }
 
-    const modelId = selection.model.model_id;
+    const modelId = selection.model.id;
 
     try {
       const response = await provider.complete({

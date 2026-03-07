@@ -292,7 +292,7 @@ class CohereAdapter implements IProviderAdapter {
       body['tools'] = req.tools.map((t) => ({
         name: t.name,
         description: t.description,
-        parameter_definitions: t.parameters,
+        parameter_definitions: t.input_schema,
       }));
     }
 

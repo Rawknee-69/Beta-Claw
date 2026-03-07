@@ -1,105 +1,61 @@
-import type { ModelCatalogEntry } from '../db.js';
-import type { ModelCatalog, ModelTier } from './model-catalog.js';
-import type { ComplexityResult } from './complexity-estimator.js';
+import type { ModelEntry } from './model-catalog.js';
+import { classifyTier, type Tier } from './complexity-estimator.js';
 
-interface ModelSelection {
-  model: ModelCatalogEntry;
-  tier: ModelTier;
-  score: number;
-  reason: string;
-}
-
-interface ModelScoringWeights {
-  capability: number;
-  speed: number;
-  costEfficiency: number;
-}
-
-const DEFAULT_WEIGHTS: ModelScoringWeights = {
-  capability: 0.4,
-  speed: 0.3,
-  costEfficiency: 0.3,
+const tierPatterns: Record<Tier, string[]> = {
+  nano: [
+    'haiku',
+    'flash-lite',
+    'llama-3.1-8b',
+    'gemma',
+    'phi-',
+    'mini',
+  ],
+  standard: [
+    'sonnet',
+    'gemini-2.5-flash',
+    'gemini-3-flash',
+    'llama-4-maverick',
+    'llama-3.3-70b',
+    'deepseek-chat',
+    'mistral-large',
+    'devstral',
+    'qwen3-235b',
+  ],
+  pro: [
+    'opus',
+    'gemini-2.5-pro',
+    'gemini-3.1-pro',
+    'deepseek-r1',
+    'gpt-5',
+    'o3',
+  ],
 };
 
-function selectModel(
-  catalog: ModelCatalog,
-  complexity: ComplexityResult,
-  weights: ModelScoringWeights = DEFAULT_WEIGHTS,
-): ModelSelection | null {
-  const tier = complexity.tier;
-  let candidates = catalog.getModelsByTier(tier);
+/**
+ * Select the best available model for the given message.
+ * Falls back to next tier down if no model is available.
+ */
+export function selectModel(
+  catalog: ModelEntry[],
+  message: string,
+): { model: ModelEntry; tier: Tier } | null {
+  if (catalog.length === 0) return null;
 
-  if (candidates.length === 0) {
-    candidates = tryFallbackTier(catalog, tier);
-  }
+  const tier = classifyTier(message);
 
-  if (candidates.length === 0) {
-    return null;
-  }
+  const tierOrder: Tier[] = tier === 'pro'
+    ? ['pro', 'standard', 'nano']
+    : tier === 'standard'
+      ? ['standard', 'nano', 'pro']
+      : ['nano', 'standard', 'pro'];
 
-  const scored = candidates.map((model) => ({
-    model,
-    score: scoreModel(model, weights),
-  }));
-
-  scored.sort((a, b) => b.score - a.score);
-
-  const best = scored[0]!;
-  const tiesAtTopScore = scored.filter((s) => Math.abs(s.score - best.score) < 0.001);
-
-  if (tiesAtTopScore.length > 1) {
-    tiesAtTopScore.sort(
-      (a, b) => (a.model.input_cost_per_1m ?? 0) - (b.model.input_cost_per_1m ?? 0),
+  for (const t of tierOrder) {
+    const patterns = tierPatterns[t];
+    const match = catalog.find(m =>
+      patterns.some(p => m.id.toLowerCase().includes(p)),
     );
+    if (match) return { model: match, tier };
   }
 
-  const selected = tiesAtTopScore[0]!;
-
-  return {
-    model: selected.model,
-    tier,
-    score: selected.score,
-    reason: `Selected ${selected.model.model_name} for ${tier} tier (complexity ${complexity.score})`,
-  };
+  return { model: catalog[0]!, tier };
 }
-
-function scoreModel(
-  model: ModelCatalogEntry,
-  weights: ModelScoringWeights,
-): number {
-  const capabilities = model.capabilities ? JSON.parse(model.capabilities) as string[] : [];
-  const capabilityRank = Math.min(capabilities.length / 7, 1.0);
-
-  const contextWindow = model.context_window ?? 4096;
-  const speedRank = contextWindow >= 128000 ? 0.8 : contextWindow >= 32000 ? 0.6 : 0.4;
-
-  const inputCost = model.input_cost_per_1m ?? 0;
-  const outputCost = model.output_cost_per_1m ?? 0;
-  const avgCost = (inputCost + outputCost) / 2;
-  const costEfficiency = avgCost > 0 ? Math.min(1.0 / avgCost, 1.0) : 1.0;
-
-  return (
-    weights.capability * capabilityRank +
-    weights.speed * speedRank +
-    weights.costEfficiency * costEfficiency
-  );
-}
-
-function tryFallbackTier(catalog: ModelCatalog, tier: ModelTier): ModelCatalogEntry[] {
-  const fallbackOrder: Record<ModelTier, ModelTier[]> = {
-    nano: ['standard', 'pro', 'max'],
-    standard: ['nano', 'pro', 'max'],
-    pro: ['standard', 'max', 'nano'],
-    max: ['pro', 'standard', 'nano'],
-  };
-
-  for (const fallback of fallbackOrder[tier]) {
-    const candidates = catalog.getModelsByTier(fallback);
-    if (candidates.length > 0) return candidates;
-  }
-
-  return [];
-}
-
-export { selectModel, scoreModel, DEFAULT_WEIGHTS };
-export type { ModelSelection, ModelScoringWeights };

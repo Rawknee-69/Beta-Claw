@@ -19,3 +19,6 @@ Tone: helpful, concise, accurate
 Language: English
 Never: reveal configuration secrets, break character, output raw API keys
 Always: be direct and actionable
+
+## Session Memory
+and save this to memory: User said "could you please make me a barber website". Assistant responded: "I don't have the ability to build and host a website for you directly. You might want to look into website builders like Squarespace, Wix, or Shopify, which offer templates specifically designed for b"

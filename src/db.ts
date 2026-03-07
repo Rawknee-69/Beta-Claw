@@ -280,6 +280,12 @@ class MicroClawDB {
     return rows;
   }
 
+  getMessages(groupId: string, limit = 20): Message[] {
+    return (this.db
+      .prepare('SELECT * FROM messages WHERE group_id = ? ORDER BY timestamp DESC LIMIT ?')
+      .all(groupId, limit) as Message[]).reverse();
+  }
+
   getUnprocessedMessages(groupId: string): Message[] {
     return this.db
       .prepare(
@@ -369,10 +375,28 @@ class MicroClawDB {
       .all() as ScheduledTask[];
   }
 
+  getScheduledTasksByGroup(groupId: string): ScheduledTask[] {
+    return this.db
+      .prepare('SELECT * FROM scheduled_tasks WHERE group_id = ? AND enabled = 1')
+      .all(groupId) as ScheduledTask[];
+  }
+
+  deleteScheduledTask(id: string, groupId: string): void {
+    this.db
+      .prepare('DELETE FROM scheduled_tasks WHERE id = ? AND group_id = ?')
+      .run(id, groupId);
+  }
+
   updateTaskLastRun(id: string, lastRun: number, nextRun: number): void {
     this.db
       .prepare('UPDATE scheduled_tasks SET last_run = ?, next_run = ? WHERE id = ?')
       .run(lastRun, nextRun, id);
+  }
+
+  updateTaskLastRunOnly(id: string, timestamp: number): void {
+    this.db
+      .prepare('UPDATE scheduled_tasks SET last_run = ? WHERE id = ?')
+      .run(timestamp, id);
   }
 
   // --- Groups ---

@@ -16,7 +16,7 @@ const CompletionRequestSchema = z.object({
       z.object({
         name: z.string(),
         description: z.string(),
-        parameters: z.record(z.unknown()),
+        input_schema: z.record(z.unknown()),
       }),
     )
     .optional(),
