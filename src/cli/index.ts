@@ -10,6 +10,7 @@ import { logsCommand } from './commands/logs.js';
 import { setupCommand } from './commands/setup.js';
 import { doctorCommand } from './commands/doctor.js';
 import { benchmarkCommand } from './commands/benchmark.js';
+import { exportCommand } from './commands/export.js';
 
 const program = new Command();
 
@@ -29,5 +30,6 @@ program.addCommand(logsCommand);
 program.addCommand(setupCommand);
 program.addCommand(doctorCommand);
 program.addCommand(benchmarkCommand);
+program.addCommand(exportCommand);
 
 program.parse();

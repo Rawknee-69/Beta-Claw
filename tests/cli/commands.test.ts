@@ -11,6 +11,7 @@ import { doctorCommand } from '../../src/cli/commands/doctor.js';
 import { benchmarkCommand } from '../../src/cli/commands/benchmark.js';
 import { chatCommand } from '../../src/cli/commands/chat.js';
 import { daemonCommand } from '../../src/cli/commands/daemon.js';
+import { exportCommand } from '../../src/cli/commands/export.js';
 
 function buildProgram(): Command {
   const program = new Command();
@@ -26,11 +27,12 @@ function buildProgram(): Command {
   program.addCommand(setupCommand);
   program.addCommand(doctorCommand);
   program.addCommand(benchmarkCommand);
+  program.addCommand(exportCommand);
   return program;
 }
 
 describe('CLI command registration', () => {
-  it('registers all 11 top-level commands', () => {
+  it('registers all 12 top-level commands', () => {
     const program = buildProgram();
     const names = program.commands.map((c) => c.name());
     expect(names).toContain('chat');
@@ -44,7 +46,8 @@ describe('CLI command registration', () => {
     expect(names).toContain('setup');
     expect(names).toContain('doctor');
     expect(names).toContain('benchmark');
-    expect(names.length).toBe(11);
+    expect(names).toContain('export');
+    expect(names.length).toBe(12);
   });
 
   it('each command is a Commander instance', () => {
@@ -52,7 +55,7 @@ describe('CLI command registration', () => {
       skillsCommand, providerCommand, memoryCommand,
       vaultCommand, rollbackCommand, logsCommand,
       setupCommand, doctorCommand, benchmarkCommand,
-      chatCommand, daemonCommand,
+      chatCommand, daemonCommand, exportCommand,
     ];
     for (const cmd of commands) {
       expect(cmd).toBeInstanceOf(Command);
@@ -242,6 +245,7 @@ describe('help text generation', () => {
     expect(help).toContain('setup');
     expect(help).toContain('doctor');
     expect(help).toContain('benchmark');
+    expect(help).toContain('export');
   });
 
   it('skills help mentions subcommands', () => {

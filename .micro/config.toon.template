@@ -1,0 +1,37 @@
+# MicroClaw Configuration Template
+# Copy to .micro/config.toon and customize
+@config{
+  version:2.0.0
+  profile:standard
+  executionMode:isolated
+  triggerWord:@Andy
+  
+  providers{
+    # Add your provider API keys via: microclaw vault add <KEY_NAME>
+    # Then configure providers via: microclaw provider add
+  }
+  
+  channels{
+    cli{
+      enabled:true
+    }
+    http{
+      enabled:false
+      port:3210
+    }
+  }
+  
+  security{
+    vaultEnabled:true
+    piiRedaction:true
+    injectionDetection:true
+    personaLock:true
+  }
+  
+  memory{
+    maxWorkingTokens:8192
+    summarizeThreshold:0.85
+    ragChunkSize:500
+    ragChunkOverlap:50
+  }
+}

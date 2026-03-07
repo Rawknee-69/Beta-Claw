@@ -1,0 +1,22 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:delete_file
+  description:Delete a file at a given path. Requires confirmation before execution.
+  parameters{
+    path{
+      type:string
+      required:true
+      description:Absolute or relative path to the file to delete
+    }
+  }
+  returns{
+    success:boolean
+    deleted_path:string
+  }
+  category:file_ops
+  safety_note:|
+    This tool permanently deletes a file. The agent must confirm with the user
+    before executing, unless the deletion was explicitly requested.
+    Directories are not supported — use a dedicated tool for recursive removal.
+  |
+}

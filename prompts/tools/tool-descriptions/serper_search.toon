@@ -1,0 +1,30 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:serper_search
+  description:Google search via Serper API for real-time web results
+  parameters{
+    query{
+      type:string
+      required:true
+      description:Search query — concise, keyword-rich
+      max_length:400
+    }
+    num{
+      type:number
+      required:false
+      default:5
+      description:Number of results to return (1-20)
+    }
+    gl{
+      type:string
+      required:false
+      description:Two-letter country code to localize results (e.g. us, gb, de)
+    }
+  }
+  returns{
+    results:array of {title, link, snippet, position}
+  }
+  category:web_search
+  rate_limit:1 request per 2 seconds
+  cost:low
+}

@@ -1,0 +1,24 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:summarize_page
+  description:Summarize the content of a web page into key points
+  parameters{
+    url{
+      type:string
+      required:true
+      description:URL of the page to summarize
+    }
+    max_length{
+      type:number
+      required:false
+      description:Maximum summary length in tokens
+      default:200
+    }
+  }
+  returns{
+    summary:string
+    title:string
+    word_count:number
+  }
+  category:web_search
+}
