@@ -1,0 +1,47 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:list_dir
+  category:file_operations
+  description:List files and directories at a given path
+  parameters:{
+    path:{
+      type:string
+      required:false
+      default:.
+      description:Relative directory path from project root
+      validation:no path traversal (../) allowed
+    }
+    recursive:{
+      type:boolean
+      required:false
+      default:false
+      description:List contents recursively (tree view)
+    }
+    max_depth:{
+      type:number
+      required:false
+      default:3
+      description:Maximum recursion depth (only with recursive=true)
+    }
+    pattern:{
+      type:string
+      required:false
+      description:Glob pattern to filter results (e.g., *.ts, *.py)
+    }
+  }
+  returns:{
+    entries:array of {name, type (file|dir), size_bytes, modified_at}
+    total_files:number of files found
+    total_dirs:number of directories found
+    path:absolute path of the listed directory
+  }
+  usage_hints:|
+    Use for: exploring project structure, finding files, understanding layout.
+    Use recursive=true with max_depth for project overviews.
+    Use pattern to narrow results when looking for specific file types.
+    Prefer this over run_code with ls/find for directory listing.
+    Results are sorted: directories first, then files, both alphabetical.
+  |
+  rate_limit:none
+  cost:low
+}

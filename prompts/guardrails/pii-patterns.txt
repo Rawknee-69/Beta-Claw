@@ -1,0 +1,21 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+# PII regex patterns for input/output scanning
+# Format: pattern_name | regex_pattern | description | action
+credit_card_visa | \b4[0-9]{3}[\s\-]?[0-9]{4}[\s\-]?[0-9]{4}[\s\-]?[0-9]{4}\b | Visa card number | redact
+credit_card_mc | \b5[1-5][0-9]{2}[\s\-]?[0-9]{4}[\s\-]?[0-9]{4}[\s\-]?[0-9]{4}\b | Mastercard number | redact
+credit_card_amex | \b3[47][0-9]{2}[\s\-]?[0-9]{6}[\s\-]?[0-9]{5}\b | Amex card number | redact
+credit_card_discover | \b6(?:011|5[0-9]{2})[\s\-]?[0-9]{4}[\s\-]?[0-9]{4}[\s\-]?[0-9]{4}\b | Discover card number | redact
+ssn_us | \b[0-9]{3}[\s\-]?[0-9]{2}[\s\-]?[0-9]{4}\b | US Social Security Number | redact
+ssn_uk_nino | \b[A-CEGHJ-PR-TW-Z]{2}\s?[0-9]{2}\s?[0-9]{2}\s?[0-9]{2}\s?[A-D]\b | UK National Insurance Number | redact
+email_address | \b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b | Email address | flag
+phone_us | \b(\+?1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}\b | US phone number | flag
+phone_intl | \b\+[1-9]\d{1,2}[\s\-.]?\d{2,4}[\s\-.]?\d{4,10}\b | International phone number | flag
+passport_us | \b[0-9]{9}\b | US passport number (contextual) | flag
+drivers_license | \b[A-Z]{1,2}[0-9]{5,8}\b | Driver's license (contextual) | flag
+date_of_birth | \b(0[1-9]|1[0-2])[/\-](0[1-9]|[12][0-9]|3[01])[/\-](19|20)\d{2}\b | Date of birth (MM/DD/YYYY) | flag
+ip_address_v4 | \b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b | IPv4 address | flag
+bank_account_iban | \b[A-Z]{2}[0-9]{2}\s?[A-Z0-9]{4}\s?[0-9]{4}\s?[0-9]{4}(?:\s?[0-9]{4}){0,4}(?:\s?[0-9]{1,4})?\b | IBAN number | redact
+routing_number | \b[0-9]{9}\b | US bank routing number (contextual) | flag
+medical_record | \b[A-Z]{2,3}[0-9]{6,10}\b | Medical record number (contextual) | flag
+api_key_generic | \b[A-Za-z0-9]{32,}\b | Generic API key (contextual, long alphanumeric) | flag
+street_address | \b\d{1,5}\s[A-Z][a-z]+\s(?:St|Ave|Blvd|Dr|Rd|Ln|Ct|Way|Pl)\b | US street address | flag

@@ -1,0 +1,38 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:brave_search
+  category:information_retrieval
+  description:Search the web using the Brave Search API for current information
+  parameters:{
+    query:{
+      type:string
+      required:true
+      description:The search query — concise, keyword-rich
+      max_length:400
+    }
+    count:{
+      type:number
+      required:false
+      default:5
+      description:Number of results to return (1-20)
+    }
+    freshness:{
+      type:string
+      required:false
+      enum:[day, week, month, year]
+      description:Filter results by recency
+    }
+  }
+  returns:{
+    results:array of {title, url, snippet, age}
+    total_count:number of total matches
+  }
+  usage_hints:|
+    Use for: current events, technical docs, fact-checking, product info.
+    Prefer over LLM knowledge when recency matters.
+    Formulate queries as keyword phrases, not natural language questions.
+    Combine with fetch_url to get full page content from promising results.
+  |
+  rate_limit:1 request per 2 seconds
+  cost:low
+}

@@ -1,0 +1,49 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:install_pkg
+  category:environment
+  description:Install a package or dependency using the appropriate package manager
+  parameters:{
+    package:{
+      type:string
+      required:true
+      description:Package name (e.g., lodash, numpy, express)
+    }
+    version:{
+      type:string
+      required:false
+      description:Specific version or range (e.g., ^4.0.0, >=3.2)
+    }
+    manager:{
+      type:string
+      required:false
+      default:auto
+      enum:[npm, pip, auto]
+      description:Package manager — auto detects from project context
+    }
+    dev:{
+      type:boolean
+      required:false
+      default:false
+      description:Install as development dependency
+    }
+  }
+  returns:{
+    package:installed package name
+    version:installed version
+    manager:package manager used
+    dependencies_added:number of transitive dependencies installed
+    success:boolean
+  }
+  usage_hints:|
+    Use for: adding project dependencies, setting up environments.
+    Auto mode detects the package manager from project files:
+      package.json → npm, requirements.txt/pyproject.toml → pip.
+    Always specify version for production dependencies.
+    Use dev=true for testing/build tools (jest, pytest, webpack, etc.).
+    Requires user approval — package installs execute arbitrary code.
+    Never install packages from user-provided URLs without verification.
+  |
+  rate_limit:1 request per 10 seconds
+  cost:medium
+}

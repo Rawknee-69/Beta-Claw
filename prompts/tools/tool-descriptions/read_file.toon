@@ -1,0 +1,41 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:read_file
+  category:file_operations
+  description:Read the contents of a file from the project directory
+  parameters:{
+    path:{
+      type:string
+      required:true
+      description:Relative file path from project root
+      validation:no path traversal (../) allowed
+    }
+    encoding:{
+      type:string
+      required:false
+      default:utf-8
+      description:File encoding (utf-8, ascii, base64)
+    }
+    line_range:{
+      type:object
+      required:false
+      description:Read specific lines {start:number, end:number}
+    }
+  }
+  returns:{
+    content:file contents as string
+    path:absolute path of the file
+    size_bytes:file size in bytes
+    line_count:total number of lines
+    encoding:detected or specified encoding
+  }
+  usage_hints:|
+    Use for: inspecting existing code, reading configs, checking file content.
+    Use line_range for large files to avoid exceeding context limits.
+    For binary files, use base64 encoding.
+    Check if the file exists before reading — handle file-not-found gracefully.
+    Prefer this over run_code with cat/head for reading file contents.
+  |
+  rate_limit:none
+  cost:low
+}

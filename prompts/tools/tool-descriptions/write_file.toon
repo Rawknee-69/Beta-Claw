@@ -1,0 +1,48 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:write_file
+  category:file_operations
+  description:Create or overwrite a file with specified content
+  parameters:{
+    path:{
+      type:string
+      required:true
+      description:Relative file path from project root
+      validation:no path traversal (../) allowed
+    }
+    content:{
+      type:string
+      required:true
+      description:File content to write
+      max_length:50000
+    }
+    create_dirs:{
+      type:boolean
+      required:false
+      default:true
+      description:Create parent directories if they don't exist
+    }
+    mode:{
+      type:string
+      required:false
+      default:overwrite
+      enum:[overwrite, append, create_only]
+      description:Write mode — create_only fails if file exists
+    }
+  }
+  returns:{
+    path:absolute path of written file
+    bytes_written:number of bytes written
+    created:boolean — true if file was newly created
+  }
+  usage_hints:|
+    Use for: saving code files, creating configs, writing output data.
+    Always use create_only mode when the user says "create" to avoid
+    accidentally overwriting existing files.
+    Path is relative to the project root — never use absolute paths.
+    Validate file extensions match content type.
+    The user must approve file writes in Full Control mode.
+  |
+  rate_limit:none
+  cost:low
+}

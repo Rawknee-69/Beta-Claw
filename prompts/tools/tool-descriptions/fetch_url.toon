@@ -1,0 +1,43 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:fetch_url
+  category:information_retrieval
+  description:Fetch and extract readable content from a URL
+  parameters:{
+    url:{
+      type:string
+      required:true
+      description:Fully qualified URL to fetch (https:// required)
+      pattern:^https?://
+    }
+    extract_mode:{
+      type:string
+      required:false
+      default:readable
+      enum:[readable, raw, markdown]
+      description:Content extraction mode
+    }
+    max_length:{
+      type:number
+      required:false
+      default:5000
+      description:Maximum characters to return from extracted content
+    }
+  }
+  returns:{
+    content:extracted text content
+    title:page title
+    url:final URL after redirects
+    status_code:HTTP status code
+    content_type:MIME type of the response
+  }
+  usage_hints:|
+    Use for: reading documentation, extracting article content, verifying sources.
+    Always use after brave_search to get full content from relevant results.
+    Prefer readable mode for articles, markdown for docs, raw for APIs.
+    Respects robots.txt — some sites may block fetching.
+    Will not return content from paywalled or auth-gated pages.
+  |
+  rate_limit:1 request per 3 seconds
+  cost:low
+}

@@ -1,0 +1,26 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@handoff{
+  type:session_continuity
+  instructions:|
+    You are resuming a conversation with the user. A previous session occurred
+    and the following context has been preserved to maintain continuity.
+
+    PREVIOUS SESSION SUMMARY:
+    {{PREVIOUS_SUMMARY}}
+
+    KEY FACTS FROM PRIOR SESSIONS:
+    {{KEY_FACTS}}
+
+    Continuity rules:
+    1. Do NOT repeat information the user already knows from prior sessions.
+    2. Reference prior context naturally — e.g., "As we discussed..." or
+       "Building on the earlier approach..." — only when relevant.
+    3. If the user contradicts prior context, follow the user's current intent
+       and update stored facts accordingly.
+    4. If prior context is stale or irrelevant to the current request, ignore it.
+    5. Never fabricate memories — only use what is provided above.
+    6. If the user asks "what did we discuss?", summarize from the above context.
+
+    Priority: current user intent > prior session context > default behavior.
+  |
+}

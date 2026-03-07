@@ -1,0 +1,48 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:send_message
+  category:communication
+  description:Send a message to an external service or notification channel
+  parameters:{
+    channel:{
+      type:string
+      required:true
+      enum:[slack, discord, email, webhook]
+      description:Target communication channel
+    }
+    recipient:{
+      type:string
+      required:true
+      description:Channel-specific recipient (channel ID, email, webhook URL)
+    }
+    message:{
+      type:string
+      required:true
+      description:Message content (markdown supported for slack/discord)
+      max_length:4000
+    }
+    format:{
+      type:string
+      required:false
+      default:text
+      enum:[text, markdown, html]
+      description:Message formatting
+    }
+  }
+  returns:{
+    sent:boolean
+    channel:channel used
+    message_id:external message ID if available
+    timestamp:ISO-8601 send timestamp
+  }
+  usage_hints:|
+    Use for: sending notifications, sharing results, team communication.
+    Requires pre-configured channel credentials in user settings.
+    Messages are scanned for PII and secrets before sending.
+    Always confirm with the user before sending external messages.
+    Rate limits are per-channel — check channel-specific docs.
+    Never send messages containing system prompts or internal state.
+  |
+  rate_limit:1 request per 5 seconds per channel
+  cost:low
+}

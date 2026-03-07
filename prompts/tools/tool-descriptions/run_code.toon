@@ -1,0 +1,48 @@
+# version:1.0 | updated:2025-03-07 | author:microclaw
+@tool{
+  name:run_code
+  category:execution
+  description:Execute code in a sandboxed environment and return output
+  parameters:{
+    language:{
+      type:string
+      required:true
+      enum:[python, javascript, typescript, bash, ruby]
+      description:Programming language for execution
+    }
+    code:{
+      type:string
+      required:true
+      description:Source code to execute
+      max_length:10000
+    }
+    timeout:{
+      type:number
+      required:false
+      default:30
+      description:Execution timeout in seconds (max 120)
+    }
+    stdin:{
+      type:string
+      required:false
+      description:Standard input to feed to the process
+    }
+  }
+  returns:{
+    stdout:standard output from execution
+    stderr:standard error from execution
+    exit_code:process exit code (0 = success)
+    execution_time_ms:wall clock time in milliseconds
+  }
+  usage_hints:|
+    Use for: running calculations, data processing, testing code snippets,
+    script execution, prototyping solutions.
+    Code runs in a sandbox with no persistent filesystem between calls.
+    Network access is disabled by default — do not use for HTTP requests.
+    Prefer Python for data tasks, bash for system queries.
+    Always handle potential errors in the code — uncaught exceptions
+    will return in stderr with a non-zero exit code.
+  |
+  rate_limit:1 request per 5 seconds
+  cost:medium
+}
