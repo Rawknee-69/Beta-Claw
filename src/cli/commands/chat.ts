@@ -24,6 +24,15 @@ import { ComposerAgent } from '../../agents/composer.js';
 import { executeDAG } from '../../execution/dag-executor.js';
 import type { AgentNode } from '../../execution/dag-executor.js';
 import { encode, parseAll } from '../../core/toon-serializer.js';
+import {
+  type AgentMetric,
+  extractTokensFromOutput,
+  extractFilesCreated,
+  estimateCostUSD,
+  printTurnMetrics,
+  printSessionSummary,
+  MetricsCollector,
+} from '../../core/metrics.js';
 import { OpenRouterAdapter } from '../../providers/openrouter.js';
 import { AnthropicAdapter } from '../../providers/anthropic.js';
 import { OpenAIAdapter } from '../../providers/openai.js';
@@ -45,32 +54,6 @@ interface ChatOptions {
   noPersona?: boolean;
 }
 
-interface AgentMetric {
-  agent: string;
-  durationMs: number;
-  tokensUsed: number;
-}
-
-interface TurnMetrics {
-  turnNumber: number;
-  totalMs: number;
-  planMs: number;
-  agentMetrics: AgentMetric[];
-  modelId: string;
-  complexityScore: number;
-  complexityTier: string;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  estimatedCostUSD: number;
-  memoryUtilization: number;
-  memoryTokens: number;
-  memoryMaxTokens: number;
-  heapUsedMB: number;
-  rssMB: number;
-  filesCreated: string[];
-  guardrailEvents: number;
-}
 
 const PROVIDER_ENV_MAP: Array<{
   envVar: string;
@@ -177,84 +160,6 @@ function extractHumanResponse(toonOrText: string): string {
   return toonOrText;
 }
 
-function extractTokensFromComposerOutput(toonOrText: string): { input: number; output: number; total: number } {
-  try {
-    const blocks = parseAll(toonOrText);
-    for (const block of blocks) {
-      const d = block.data;
-      const total = typeof d['tokensUsed'] === 'number' ? d['tokensUsed'] : 0;
-      return { input: 0, output: 0, total };
-    }
-  } catch { /* not TOON */ }
-  return { input: 0, output: 0, total: 0 };
-}
-
-function extractFilesCreated(toonOrText: string): string[] {
-  try {
-    const blocks = parseAll(toonOrText);
-    for (const block of blocks) {
-      const d = block.data;
-      if (Array.isArray(d['filesCreated'])) {
-        return (d['filesCreated'] as unknown[]).map(String).filter(f => f.length > 0);
-      }
-    }
-  } catch { /* not TOON */ }
-  return [];
-}
-
-function formatCost(usd: number): string {
-  if (usd === 0) return '$0';
-  if (usd < 0.0001) return `$${usd.toExponential(1)}`;
-  if (usd < 0.01) return `$${usd.toFixed(4)}`;
-  return `$${usd.toFixed(3)}`;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1) return '<1ms';
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
-}
-
-function printMetrics(m: TurnMetrics): void {
-  const dim = '\x1b[2m';
-  const cyan = '\x1b[36m';
-  const yellow = '\x1b[33m';
-  const green = '\x1b[32m';
-  const magenta = '\x1b[35m';
-  const reset = '\x1b[0m';
-  const bar = '\x1b[90m│\x1b[0m';
-
-  const memBar = buildBar(m.memoryUtilization, 20);
-  const agentLine = m.agentMetrics
-    .map(a => `${a.agent}:${formatDuration(a.durationMs)}`)
-    .join('  ');
-
-  console.log(`${dim}┌─────────────────────────────────────────────────────┐${reset}`);
-  console.log(`${bar} ${cyan}Turn ${m.turnNumber}${reset}  ${dim}${m.modelId}${reset}  ${dim}complexity:${reset}${m.complexityScore}/${m.complexityTier}`);
-  console.log(`${bar} ${yellow}Time${reset}  total:${formatDuration(m.totalMs)}  plan:${formatDuration(m.planMs)}  ${dim}${agentLine}${reset}`);
-
-  if (m.totalTokens > 0) {
-    console.log(`${bar} ${green}Tokens${reset}  in:${m.inputTokens}  out:${m.outputTokens}  total:${m.totalTokens}  ${dim}cost:${formatCost(m.estimatedCostUSD)}${reset}`);
-  }
-
-  console.log(`${bar} ${magenta}Memory${reset}  ${memBar} ${Math.round(m.memoryUtilization)}%  ${dim}${m.memoryTokens}/${m.memoryMaxTokens} tok${reset}  ${dim}heap:${m.heapUsedMB}MB  rss:${m.rssMB}MB${reset}`);
-
-  if (m.filesCreated.length > 0) {
-    console.log(`${bar} ${cyan}Files${reset}  ${m.filesCreated.join(', ')}`);
-  }
-  if (m.guardrailEvents > 0) {
-    console.log(`${bar} ${yellow}Guardrails${reset}  ${m.guardrailEvents} event(s) flagged`);
-  }
-
-  console.log(`${dim}└─────────────────────────────────────────────────────┘${reset}`);
-}
-
-function buildBar(percent: number, width: number): string {
-  const filled = Math.round((percent / 100) * width);
-  const empty = width - filled;
-  const color = percent > 85 ? '\x1b[31m' : percent > 60 ? '\x1b[33m' : '\x1b[32m';
-  return `${color}${'█'.repeat(filled)}${'░'.repeat(empty)}\x1b[0m`;
-}
 
 async function startChat(options: ChatOptions): Promise<void> {
   loadEnv();
@@ -321,6 +226,7 @@ async function startChat(options: ChatOptions): Promise<void> {
 
   const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   let turnNumber = 0;
+  const metricsCollector = new MetricsCollector();
 
   const guardrails = new Guardrails(db);
   const promptLoader = new PromptLoader();
@@ -439,6 +345,7 @@ async function startChat(options: ChatOptions): Promise<void> {
       guardrailEventCount += inputResult.events.length;
       if (!inputResult.allowed) {
         console.log(`\n[Blocked] ${inputResult.events[0]?.details ?? 'Input rejected'}\n`);
+        metricsCollector.recordBlock();
         rl.prompt();
         return;
       }
@@ -591,17 +498,13 @@ async function startChat(options: ChatOptions): Promise<void> {
       const complexity = estimateComplexity(safeInput);
       const selectedModel = selectModel(catalog, complexity);
 
-      const composerTokens = extractTokensFromComposerOutput(composerOutput);
+      const composerTokens = extractTokensFromOutput(composerOutput);
       const totalAgentTokens = agentMetrics.reduce((sum, a) => sum + a.tokensUsed, 0);
       const effectiveTokens = composerTokens.total > 0 ? composerTokens.total : totalAgentTokens;
 
-      let estimatedCostUSD = 0;
-      if (selectedModel && effectiveTokens > 0) {
-        const inputCost = selectedModel.model.input_cost_per_1m ?? 0;
-        const outputCost = selectedModel.model.output_cost_per_1m ?? 0;
-        const avgCostPer1M = (inputCost + outputCost) / 2;
-        estimatedCostUSD = (effectiveTokens / 1_000_000) * avgCostPer1M;
-      }
+      const estimatedCost = selectedModel
+        ? estimateCostUSD(effectiveTokens, selectedModel.model.input_cost_per_1m, selectedModel.model.output_cost_per_1m)
+        : 0;
 
       // Collect all files created across agents
       const allFilesCreated: string[] = [];
@@ -618,7 +521,7 @@ async function startChat(options: ChatOptions): Promise<void> {
       const budget = workingMemory.getBudget();
       const turnEnd = performance.now();
 
-      printMetrics({
+      const turnMetrics = {
         turnNumber,
         totalMs: turnEnd - turnStart,
         planMs,
@@ -629,7 +532,7 @@ async function startChat(options: ChatOptions): Promise<void> {
         inputTokens: composerTokens.input,
         outputTokens: composerTokens.output,
         totalTokens: effectiveTokens,
-        estimatedCostUSD,
+        estimatedCostUSD: estimatedCost,
         memoryUtilization: budget.utilizationPercent,
         memoryTokens: budget.totalTokens,
         memoryMaxTokens: budget.maxTokens,
@@ -637,7 +540,9 @@ async function startChat(options: ChatOptions): Promise<void> {
         rssMB: Math.round(memUsage.rss / 1024 / 1024),
         filesCreated: allFilesCreated,
         guardrailEvents: guardrailEventCount,
-      });
+      };
+      printTurnMetrics(turnMetrics);
+      metricsCollector.recordTurn(turnMetrics);
 
       workingMemory.addMessage('assistant', safeOutput);
       conversationHistory.push({ role: 'assistant', content: safeOutput });
@@ -671,6 +576,9 @@ async function startChat(options: ChatOptions): Promise<void> {
   });
 
   rl.on('close', () => {
+    if (metricsCollector.getTurnCount() > 0) {
+      printSessionSummary(metricsCollector.getSessionMetrics());
+    }
     skillWatcher.close();
     db.endSession(sessionId, 'Session closed', '', conversationHistory.length);
     db.close();
