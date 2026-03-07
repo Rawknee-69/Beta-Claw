@@ -45,6 +45,33 @@ interface ChatOptions {
   noPersona?: boolean;
 }
 
+interface AgentMetric {
+  agent: string;
+  durationMs: number;
+  tokensUsed: number;
+}
+
+interface TurnMetrics {
+  turnNumber: number;
+  totalMs: number;
+  planMs: number;
+  agentMetrics: AgentMetric[];
+  modelId: string;
+  complexityScore: number;
+  complexityTier: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUSD: number;
+  memoryUtilization: number;
+  memoryTokens: number;
+  memoryMaxTokens: number;
+  heapUsedMB: number;
+  rssMB: number;
+  filesCreated: string[];
+  guardrailEvents: number;
+}
+
 const PROVIDER_ENV_MAP: Array<{
   envVar: string;
   name: string;
@@ -150,6 +177,85 @@ function extractHumanResponse(toonOrText: string): string {
   return toonOrText;
 }
 
+function extractTokensFromComposerOutput(toonOrText: string): { input: number; output: number; total: number } {
+  try {
+    const blocks = parseAll(toonOrText);
+    for (const block of blocks) {
+      const d = block.data;
+      const total = typeof d['tokensUsed'] === 'number' ? d['tokensUsed'] : 0;
+      return { input: 0, output: 0, total };
+    }
+  } catch { /* not TOON */ }
+  return { input: 0, output: 0, total: 0 };
+}
+
+function extractFilesCreated(toonOrText: string): string[] {
+  try {
+    const blocks = parseAll(toonOrText);
+    for (const block of blocks) {
+      const d = block.data;
+      if (Array.isArray(d['filesCreated'])) {
+        return (d['filesCreated'] as unknown[]).map(String).filter(f => f.length > 0);
+      }
+    }
+  } catch { /* not TOON */ }
+  return [];
+}
+
+function formatCost(usd: number): string {
+  if (usd === 0) return '$0';
+  if (usd < 0.0001) return `$${usd.toExponential(1)}`;
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(3)}`;
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1) return '<1ms';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function printMetrics(m: TurnMetrics): void {
+  const dim = '\x1b[2m';
+  const cyan = '\x1b[36m';
+  const yellow = '\x1b[33m';
+  const green = '\x1b[32m';
+  const magenta = '\x1b[35m';
+  const reset = '\x1b[0m';
+  const bar = '\x1b[90m│\x1b[0m';
+
+  const memBar = buildBar(m.memoryUtilization, 20);
+  const agentLine = m.agentMetrics
+    .map(a => `${a.agent}:${formatDuration(a.durationMs)}`)
+    .join('  ');
+
+  console.log(`${dim}┌─────────────────────────────────────────────────────┐${reset}`);
+  console.log(`${bar} ${cyan}Turn ${m.turnNumber}${reset}  ${dim}${m.modelId}${reset}  ${dim}complexity:${reset}${m.complexityScore}/${m.complexityTier}`);
+  console.log(`${bar} ${yellow}Time${reset}  total:${formatDuration(m.totalMs)}  plan:${formatDuration(m.planMs)}  ${dim}${agentLine}${reset}`);
+
+  if (m.totalTokens > 0) {
+    console.log(`${bar} ${green}Tokens${reset}  in:${m.inputTokens}  out:${m.outputTokens}  total:${m.totalTokens}  ${dim}cost:${formatCost(m.estimatedCostUSD)}${reset}`);
+  }
+
+  console.log(`${bar} ${magenta}Memory${reset}  ${memBar} ${Math.round(m.memoryUtilization)}%  ${dim}${m.memoryTokens}/${m.memoryMaxTokens} tok${reset}  ${dim}heap:${m.heapUsedMB}MB  rss:${m.rssMB}MB${reset}`);
+
+  if (m.filesCreated.length > 0) {
+    console.log(`${bar} ${cyan}Files${reset}  ${m.filesCreated.join(', ')}`);
+  }
+  if (m.guardrailEvents > 0) {
+    console.log(`${bar} ${yellow}Guardrails${reset}  ${m.guardrailEvents} event(s) flagged`);
+  }
+
+  console.log(`${dim}└─────────────────────────────────────────────────────┘${reset}`);
+}
+
+function buildBar(percent: number, width: number): string {
+  const filled = Math.round((percent / 100) * width);
+  const empty = width - filled;
+  const color = percent > 85 ? '\x1b[31m' : percent > 60 ? '\x1b[33m' : '\x1b[32m';
+  return `${color}${'█'.repeat(filled)}${'░'.repeat(empty)}\x1b[0m`;
+}
+
 async function startChat(options: ChatOptions): Promise<void> {
   loadEnv();
 
@@ -214,6 +320,7 @@ async function startChat(options: ChatOptions): Promise<void> {
   });
 
   const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  let turnNumber = 0;
 
   const guardrails = new Guardrails(db);
   const promptLoader = new PromptLoader();
@@ -322,8 +429,14 @@ async function startChat(options: ChatOptions): Promise<void> {
     }
 
     try {
+      const turnStart = performance.now();
+      turnNumber++;
+      const agentMetrics: AgentMetric[] = [];
+      let guardrailEventCount = 0;
+
       // 1. GUARDRAILS INPUT
       const inputResult = guardrails.processInput(userInput, groupId);
+      guardrailEventCount += inputResult.events.length;
       if (!inputResult.allowed) {
         console.log(`\n[Blocked] ${inputResult.events[0]?.details ?? 'Input rejected'}\n`);
         rl.prompt();
@@ -364,6 +477,7 @@ async function startChat(options: ChatOptions): Promise<void> {
       conversationHistory.push({ role: 'user', content: safeInput });
 
       // 5. PLAN THE TASK
+      const planStart = performance.now();
       const planner = new PlannerAgent();
       const planResult = await planner.execute({
         id: crypto.randomUUID(),
@@ -372,12 +486,15 @@ async function startChat(options: ChatOptions): Promise<void> {
         groupId,
         sessionId,
       });
+      const planMs = performance.now() - planStart;
+
+      agentMetrics.push({ agent: 'planner', durationMs: planMs, tokensUsed: planResult.tokensUsed });
 
       const planBlocks = parseAll(planResult.output);
       const planBlock = planBlocks.find(b => b.type === 'plan');
 
       // 6. EXECUTE THE DAG
-      const agentMap: Record<string, { execute: (task: { id: string; type: string; brief: string; groupId: string; sessionId: string }) => Promise<{ output: string }> }> = {
+      const agentMap: Record<string, { execute: (task: { id: string; type: string; brief: string; groupId: string; sessionId: string }) => Promise<{ output: string; tokensUsed: number; durationMs: number }> }> = {
         research: new ResearchAgent(),
         execution: new ExecutionAgent(),
         memory: new MemoryAgent(),
@@ -405,6 +522,7 @@ async function startChat(options: ChatOptions): Promise<void> {
               brief = parts.join('\n');
             }
 
+            const agentStart = performance.now();
             const result = await agent.execute({
               id: node.id,
               type: node.agentType,
@@ -412,6 +530,8 @@ async function startChat(options: ChatOptions): Promise<void> {
               groupId,
               sessionId,
             });
+            const agentDuration = performance.now() - agentStart;
+            agentMetrics.push({ agent: node.agentType, durationMs: agentDuration, tokensUsed: result.tokensUsed });
             completedResults.set(node.id, result.output);
             return result.output;
           });
@@ -435,6 +555,7 @@ async function startChat(options: ChatOptions): Promise<void> {
         const researchAgent = new ResearchAgent();
         const composerAgent = new ComposerAgent();
 
+        const fbResearchStart = performance.now();
         const researchResult = await researchAgent.execute({
           id: crypto.randomUUID(),
           type: 'research',
@@ -442,7 +563,9 @@ async function startChat(options: ChatOptions): Promise<void> {
           groupId,
           sessionId,
         });
+        agentMetrics.push({ agent: 'research', durationMs: performance.now() - fbResearchStart, tokensUsed: researchResult.tokensUsed });
 
+        const fbComposeStart = performance.now();
         const composeResult = await composerAgent.execute({
           id: crypto.randomUUID(),
           type: 'composer',
@@ -450,6 +573,7 @@ async function startChat(options: ChatOptions): Promise<void> {
           groupId,
           sessionId,
         });
+        agentMetrics.push({ agent: 'composer', durationMs: performance.now() - fbComposeStart, tokensUsed: composeResult.tokensUsed });
         agentResults.set('composer', composeResult.output);
       }
 
@@ -460,16 +584,60 @@ async function startChat(options: ChatOptions): Promise<void> {
 
       // 8. GUARDRAILS OUTPUT
       const outputResult = guardrails.processOutput(finalResponse, groupId);
+      guardrailEventCount += outputResult.events.length;
       const safeOutput = outputResult.content;
 
-      // 9. SELECT MODEL FOR DISPLAY
+      // 9. SELECT MODEL FOR DISPLAY + COST ESTIMATE
       const complexity = estimateComplexity(safeInput);
       const selectedModel = selectModel(catalog, complexity);
+
+      const composerTokens = extractTokensFromComposerOutput(composerOutput);
+      const totalAgentTokens = agentMetrics.reduce((sum, a) => sum + a.tokensUsed, 0);
+      const effectiveTokens = composerTokens.total > 0 ? composerTokens.total : totalAgentTokens;
+
+      let estimatedCostUSD = 0;
+      if (selectedModel && effectiveTokens > 0) {
+        const inputCost = selectedModel.model.input_cost_per_1m ?? 0;
+        const outputCost = selectedModel.model.output_cost_per_1m ?? 0;
+        const avgCostPer1M = (inputCost + outputCost) / 2;
+        estimatedCostUSD = (effectiveTokens / 1_000_000) * avgCostPer1M;
+      }
+
+      // Collect all files created across agents
+      const allFilesCreated: string[] = [];
+      for (const [, output] of agentResults) {
+        allFilesCreated.push(...extractFilesCreated(output));
+      }
 
       // 10. PRINT AND PERSIST
       process.stdout.write(`\nMC [${options.model ?? selectedModel?.model.model_id ?? 'auto'}] > `);
       console.log(safeOutput);
       console.log('');
+
+      const memUsage = process.memoryUsage();
+      const budget = workingMemory.getBudget();
+      const turnEnd = performance.now();
+
+      printMetrics({
+        turnNumber,
+        totalMs: turnEnd - turnStart,
+        planMs,
+        agentMetrics,
+        modelId: options.model ?? selectedModel?.model.model_id ?? 'auto',
+        complexityScore: complexity.score,
+        complexityTier: complexity.tier,
+        inputTokens: composerTokens.input,
+        outputTokens: composerTokens.output,
+        totalTokens: effectiveTokens,
+        estimatedCostUSD,
+        memoryUtilization: budget.utilizationPercent,
+        memoryTokens: budget.totalTokens,
+        memoryMaxTokens: budget.maxTokens,
+        heapUsedMB: Math.round(memUsage.heapUsed / 1024 / 1024),
+        rssMB: Math.round(memUsage.rss / 1024 / 1024),
+        filesCreated: allFilesCreated,
+        guardrailEvents: guardrailEventCount,
+      });
 
       workingMemory.addMessage('assistant', safeOutput);
       conversationHistory.push({ role: 'assistant', content: safeOutput });
