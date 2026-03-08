@@ -100,13 +100,21 @@ scheduleCommand
   .requiredOption('--group <groupId>', 'Target group/chat')
   .requiredOption('--delay <delay>', 'Delay (e.g. "30 seconds", "5 minutes")')
   .requiredOption('--message <message>', 'Message to deliver')
-  .action((opts: { group: string; delay: string; message: string }) => {
+  .action(async (opts: { group: string; delay: string; message: string }) => {
     const ms = OneShotScheduler.parseDelay(opts.delay);
     if (!ms)              { console.error('Invalid delay format'); process.exit(1); }
     if (ms < 10_000)      { console.error('Minimum: 10 seconds');  process.exit(1); }
     if (ms > 604_800_000) { console.error('Maximum: 7 days');      process.exit(1); }
-    const id = oneShotScheduler.scheduleOnce(opts.group, opts.message, ms);
-    console.log(`Scheduled: ${id}`);
+    const id = `once-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const runAt = Date.now() + ms;
+    const db = await getDB();
+    try {
+      db.insertPendingOnceTask({ id, groupId: opts.group, message: opts.message, runAt });
+      console.log(`[scheduler] ${id}: "${opts.message.slice(0, 50)}" in ${Math.round(ms / 1000)}s`);
+      console.log(`Scheduled: ${id}`);
+    } finally {
+      db.close();
+    }
   });
 
 scheduleCommand

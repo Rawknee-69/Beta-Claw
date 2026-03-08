@@ -1,4 +1,4 @@
-import { spawnSync, type SpawnSyncReturns } from 'child_process';
+import { spawnSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { PATHS } from '../core/paths.js';
@@ -56,20 +56,60 @@ export async function sandboxedExec(
   return dockerExec(cmd, opts, timeoutMs);
 }
 
-function hostExec(cmd: string, cwd: string, timeoutMs: number): string {
-  const r = spawnSync('bash', ['-c', cmd], {
-    encoding: 'utf-8', timeout: timeoutMs, cwd, env: process.env,
-  });
-  return fmt(r);
+function hostExec(cmd: string, cwd: string, timeoutMs: number): Promise<string> {
+  return spawnAsync('bash', ['-c', cmd], { cwd, env: process.env }, timeoutMs);
 }
 
-function dockerExec(cmd: string, opts: SandboxRunOptions, timeoutMs: number): string {
+function dockerExec(cmd: string, opts: SandboxRunOptions, timeoutMs: number): Promise<string> {
   const id = ensureContainer(opts);
-  if (!id) return 'Sandbox unavailable: Docker not found or image not built.\nRun: microclaw sandbox setup';
-  const r = spawnSync('docker', ['exec', id, 'bash', '-c', cmd], {
-    encoding: 'utf-8', timeout: timeoutMs, env: process.env,
+  if (!id) return Promise.resolve('Sandbox unavailable: Docker not found or image not built.\nRun: microclaw sandbox setup');
+  return spawnAsync('docker', ['exec', id, 'bash', '-c', cmd], { env: process.env }, timeoutMs);
+}
+
+function spawnAsync(
+  file: string,
+  args: string[],
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv },
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise((resolve) => {
+    const chunks: { stream: 'out' | 'err'; data: string }[] = [];
+    let timedOut = false;
+
+    const child = spawn(file, args, {
+      encoding: 'utf-8',
+      cwd: opts.cwd,
+      env: opts.env,
+    } as Parameters<typeof spawn>[2]);
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+
+    child.stdout?.on('data', (d: string) => chunks.push({ stream: 'out', data: d }));
+    child.stderr?.on('data', (d: string) => chunks.push({ stream: 'err', data: d }));
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const stdout = chunks.filter(c => c.stream === 'out').map(c => c.data).join('');
+      const stderr = chunks.filter(c => c.stream === 'err').map(c => c.data).join('');
+      if (timedOut) {
+        resolve(`exec error: process timed out after ${timeoutMs}ms`);
+        return;
+      }
+      resolve([
+        `exit: ${code ?? -1}`,
+        stdout.trim() ? `stdout:\n${stdout.trim()}` : '',
+        stderr.trim() ? `stderr:\n${stderr.trim()}` : '',
+      ].filter(Boolean).join('\n') || '(no output)');
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve(`exec error: ${err.message}`);
+    });
   });
-  return fmt(r);
 }
 
 function ensureContainer(opts: SandboxRunOptions): string | null {
@@ -146,14 +186,6 @@ function dockerAvailable(): boolean {
   return spawnSync('docker', ['info'], { encoding: 'utf-8', timeout: 5_000 }).status === 0;
 }
 
-function fmt(r: SpawnSyncReturns<string>): string {
-  if (r.error) return `exec error: ${r.error.message}`;
-  return [
-    `exit: ${r.status ?? -1}`,
-    r.stdout?.trim() ? `stdout:\n${r.stdout.trim()}` : '',
-    r.stderr?.trim() ? `stderr:\n${r.stderr.trim()}` : '',
-  ].filter(Boolean).join('\n') || '(no output)';
-}
 
 export function explainSandbox(opts: SandboxRunOptions): string {
   const sandboxed = shouldSandbox(opts);

@@ -44,10 +44,17 @@ export async function runBrowserAction(args: Record<string, unknown>): Promise<s
         const page = await getPage(sessionId, tabId, headless);
         await page.goto(args['url'] as string, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-        const screenshotPath = `/tmp/mc-nav-${Date.now()}.png`;
-        await page.screenshot({ path: screenshotPath, fullPage: false });
+        // Extract visible text so the AI has real page content to reason about
+        let pageText = '';
+        try {
+          pageText = await page.innerText('body');
+        } catch { /* ignore if body unavailable */ }
+        const preview = pageText.trim().slice(0, 4000);
 
-        return `Navigated to: ${page.url()}\n[SCREENSHOT:${screenshotPath}]`;
+        return [
+          `Navigated to: ${page.url()}`,
+          preview ? `\nPage content:\n${preview}${pageText.length > 4000 ? '\n[truncated]' : ''}` : '',
+        ].join('');
       }
 
       case 'click': {

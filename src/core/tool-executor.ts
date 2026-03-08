@@ -17,7 +17,7 @@ export class ToolExecutor {
 
   constructor(
     private groupId: string,
-    private cwd: string = process.cwd(),
+    _cwd: string = process.cwd(),
     private sandboxOpts: SandboxRunOptions,
   ) {
     this.workspaceDir = ensureWorkspace(groupId);
@@ -42,8 +42,16 @@ export class ToolExecutor {
     }
   }
 
+  private resolvePath(rawPath: string): string {
+    if (path.isAbsolute(rawPath)) return rawPath;
+    if (rawPath.startsWith('.workspaces/') || rawPath.startsWith('workspaces/')) {
+      return path.resolve(rawPath);
+    }
+    return path.join(this.workspaceDir, rawPath);
+  }
+
   private read(filePath: string, offset?: number, limit?: number): string {
-    const abs = path.resolve(this.cwd, filePath);
+    const abs = this.resolvePath(filePath);
     if (!fs.existsSync(abs)) return `Not found: ${abs}`;
     let content = fs.readFileSync(abs, 'utf-8');
     if (offset) content = content.slice(offset);
@@ -52,11 +60,7 @@ export class ToolExecutor {
   }
 
   private resolveWritePath(rawPath: string): string {
-    if (path.isAbsolute(rawPath)) return rawPath;
-    if (rawPath.startsWith('.workspaces/') || rawPath.startsWith('workspaces/')) {
-      return path.resolve(rawPath);
-    }
-    return path.join(this.workspaceDir, rawPath);
+    return this.resolvePath(rawPath);
   }
 
   private write(filePath: string, content: string): string {
@@ -88,7 +92,7 @@ export class ToolExecutor {
   }
 
   private list(dirPath: string, recursive = false): string {
-    const abs = path.resolve(this.cwd, dirPath);
+    const abs = this.resolvePath(dirPath);
     if (!fs.existsSync(abs)) return `Not found: ${abs}`;
     if (!recursive) {
       return fs.readdirSync(abs, { withFileTypes: true })

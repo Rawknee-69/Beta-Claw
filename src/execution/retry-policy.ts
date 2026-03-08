@@ -60,6 +60,8 @@ export function isTransientError(err: unknown): boolean {
   if (msg.includes('timeout') || msg.includes('socket hang up')) return true;
   if (msg.includes('temporarily unavailable') || msg.includes('service unavailable')) return true;
   if (msg.includes('network') || msg.includes('fetch failed')) return true;
+  // WhatsApp/Baileys connection errors during reconnection
+  if (msg.includes('connection closed') || msg.includes('connection reset')) return true;
   return false;
 }
 

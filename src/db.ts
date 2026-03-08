@@ -266,6 +266,16 @@ CREATE TABLE IF NOT EXISTS ipc_messages (
   created_at INTEGER DEFAULT (unixepoch())
 );
 
+-- Pending one-shot scheduled messages (cross-process, persistent)
+CREATE TABLE IF NOT EXISTS pending_once_tasks (
+  id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL,
+  message TEXT NOT NULL,
+  run_at INTEGER NOT NULL,
+  picked_up INTEGER DEFAULT 0,
+  created_at INTEGER DEFAULT (unixepoch())
+);
+
 -- Snapshots (rollback)
 CREATE TABLE IF NOT EXISTS snapshots (
   id TEXT PRIMARY KEY,
@@ -563,6 +573,27 @@ class MicroClawDB {
 
   markIpcProcessed(id: string): void {
     this.db.prepare('UPDATE ipc_messages SET processed = 1 WHERE id = ?').run(id);
+  }
+
+  // --- Pending once-tasks (cross-process one-shot scheduling) ---
+
+  insertPendingOnceTask(task: { id: string; groupId: string; message: string; runAt: number }): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO pending_once_tasks (id, group_id, message, run_at)
+         VALUES (@id, @group_id, @message, @run_at)`,
+      )
+      .run({ id: task.id, group_id: task.groupId, message: task.message, run_at: task.runAt });
+  }
+
+  getPendingOnceTasks(): Array<{ id: string; group_id: string; message: string; run_at: number }> {
+    return this.db
+      .prepare('SELECT id, group_id, message, run_at FROM pending_once_tasks WHERE picked_up = 0 ORDER BY run_at ASC')
+      .all() as Array<{ id: string; group_id: string; message: string; run_at: number }>;
+  }
+
+  markOnceTaskPickedUp(id: string): void {
+    this.db.prepare('UPDATE pending_once_tasks SET picked_up = 1 WHERE id = ?').run(id);
   }
 
   // --- Snapshots ---

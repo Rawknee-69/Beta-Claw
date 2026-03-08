@@ -49,11 +49,12 @@ export class WhatsAppChannel implements IChannel {
       // Track whether we ever successfully opened to decide whether to wipe auth on retry.
       let everConnected = false;
       let qrCount = 0;
+      // 515 = restartRequired — happens right after a successful QR scan; do NOT wipe auth.
+      const RESTART_REQUIRED = 515;
 
-      const startSocket = async (): Promise<void> => {
-        // On QR retry (never connected), wipe stale partial creds so WhatsApp
-        // doesn't show "try again later" on the next scan.
-        if (!everConnected && qrCount > 0) {
+      const startSocket = async (reconnectAfterClose = false): Promise<void> => {
+        // Wipe auth only when showing a fresh QR (retry), not when reconnecting after 515 post-scan.
+        if (!everConnected && qrCount > 0 && !reconnectAfterClose) {
           try {
             fs.rmSync(AUTH_DIR, { recursive: true, force: true });
             fs.mkdirSync(AUTH_DIR, { recursive: true });
@@ -63,7 +64,6 @@ export class WhatsAppChannel implements IChannel {
 
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-        // Do NOT use printQRInTerminal — it is deprecated. We render QR ourselves.
         const sock: any = makeWASocket({
           version,
           auth: state,
@@ -82,7 +82,7 @@ export class WhatsAppChannel implements IChannel {
               const qrTerminal = (qrTerminalMod.default ?? qrTerminalMod) as { generate: (qr: string, opts: { small: boolean }) => void };
               console.log('\n[whatsapp] Scan this QR code with WhatsApp → Linked Devices → Link a Device:\n');
               qrTerminal.generate(update.qr as string, { small: true });
-              console.log('\n[whatsapp] Waiting for scan...\n');
+              console.log('\n[whatsapp] Waiting for scan... If it refreshes, scan the newest one.\n');
             } catch {
               console.log('[whatsapp] QR code available — install qrcode-terminal to display it, or use microclaw setup to pair.');
             }
@@ -95,13 +95,17 @@ export class WhatsAppChannel implements IChannel {
           if (update.connection === 'close') {
             this.connected = false;
             const statusCode = update.lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) {
-              console.log('[whatsapp] Reconnecting...');
-              setTimeout(() => void startSocket(), 3000);
-            } else {
+            if (statusCode === DisconnectReason.loggedOut) {
               console.log('[whatsapp] Logged out. Delete .micro/whatsapp-auth and restart.');
+              return;
             }
+            const isRestartRequired = statusCode === RESTART_REQUIRED;
+            if (isRestartRequired) {
+              console.log('[whatsapp] Reconnecting with your credentials...');
+            } else {
+              console.log('[whatsapp] Reconnecting...');
+            }
+            setTimeout(() => void startSocket(isRestartRequired), isRestartRequired ? 5000 : 3000);
           }
         });
 
@@ -173,6 +177,7 @@ export class WhatsAppChannel implements IChannel {
   }
 
   async send(msg: OutboundMessage): Promise<void> {
+    await this.waitForConnection();
     if (!this.sock) throw new Error('WhatsApp not connected');
     const sendMessage = (this.sock as Record<string, (...a: unknown[]) => Promise<void>>)['sendMessage'];
     if (!sendMessage) throw new Error('WhatsApp socket has no sendMessage');
@@ -180,6 +185,22 @@ export class WhatsAppChannel implements IChannel {
     for (const chunk of chunks) {
       await sendMessage.call(this.sock, msg.groupId, { text: chunk });
     }
+  }
+
+  private waitForConnection(timeoutMs = 15_000): Promise<void> {
+    if (this.connected) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + timeoutMs;
+      const check = setInterval(() => {
+        if (this.connected) {
+          clearInterval(check);
+          resolve();
+        } else if (Date.now() >= deadline) {
+          clearInterval(check);
+          reject(new Error('WhatsApp reconnection timed out'));
+        }
+      }, 250);
+    });
   }
 
   supportsFeature(f: ChannelFeature): boolean {

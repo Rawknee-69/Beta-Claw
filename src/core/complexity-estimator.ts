@@ -67,17 +67,18 @@ const CONTEXT_PRO_RE = [
   /\b(build|create|make|write)\b.{0,80}\b(website|app|api|system|platform|component)\b/i,
   /\b(debug|fix|refactor|migrate|deploy|review|optimize|audit)\b/i,
   /\b(authentication|docker|kubernetes|database|security|pipeline)\b/i,
-  /\b(tool_result|exec|write|read)\b/i,
   /```[\s\S]{10,}/,
-  /\b\w+\.(ts|js|py|go|rs|sh|sql)\b/i,
 ];
 const CONTEXT_STANDARD_RE = [
   /\b(search|find|summarize|list|compare|explain|translate)\b/i,
   /\b(csv|json|yaml|sql|html|css|script)\b/i,
 ];
 
-export function inferContextFloor(history: HistoryMessage[], windowSize = 6): Tier {
-  const recent = history.slice(-windowSize);
+export function inferContextFloor(history: HistoryMessage[], windowSize = 3): Tier {
+  // Only scan user messages — assistant replies and tool results contain code/filenames
+  // that would falsely inflate the floor tier.
+  const userMessages = history.filter(m => m.role === 'user');
+  const recent = userMessages.slice(-windowSize);
   const text   = recent.map(m => m.content).join('\n');
   for (const p of CONTEXT_MAX_RE)      if (p.test(text)) return 'max';
   for (const p of CONTEXT_PRO_RE)      if (p.test(text)) return 'pro';

@@ -65,21 +65,30 @@ class BrowserManager {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     const statePath = path.join(this.stateDir, `${sessionId}.json`);
-    await session.ctx.storageState({ path: statePath });
-    console.log(`[browser] State saved: ${statePath}`);
+    try {
+      await session.ctx.storageState({ path: statePath });
+      console.log(`[browser] State saved: ${statePath}`);
+    } catch {
+      // Context may already be closed (e.g. during process shutdown) — skip silently
+    }
   }
 
   async closeSession(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
-    await this.saveState(sessionId);
-    await session.browser.close();
     this.sessions.delete(sessionId);
+    try {
+      await this.saveState(sessionId);
+    } catch { /* ignore */ }
+    try {
+      await session.browser.close();
+    } catch { /* ignore */ }
     console.log(`[browser] Session closed: ${sessionId}`);
   }
 
   async closeAll(): Promise<void> {
-    for (const id of this.sessions.keys()) {
+    const ids = [...this.sessions.keys()];
+    for (const id of ids) {
       await this.closeSession(id);
     }
   }

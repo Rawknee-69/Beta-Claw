@@ -255,6 +255,7 @@ class Orchestrator extends EventEmitter {
     scheduleClawHubSync();
 
     this.processPendingIpc();
+    this.startOnceTaskPoller();
     this.logger.info('Orchestrator started — event-driven with agent loop');
   }
 
@@ -472,6 +473,25 @@ class Orchestrator extends EventEmitter {
       } satisfies OrchestratorEvent);
       this.db.markIpcProcessed(msg.id);
     }
+  }
+
+  private startOnceTaskPoller(): void {
+    const poll = () => {
+      if (!this.running) return;
+      try {
+        const tasks = this.db.getPendingOnceTasks();
+        for (const task of tasks) {
+          const delayMs = Math.max(0, task.run_at - Date.now());
+          this.db.markOnceTaskPickedUp(task.id);
+          oneShotScheduler.scheduleOnce(task.group_id, task.message, delayMs);
+          this.logger.info({ id: task.id, groupId: task.group_id, delayMs }, 'One-shot task picked up from DB');
+        }
+      } catch (e) {
+        this.logger.warn({ err: e }, 'Once-task poller error');
+      }
+      if (this.running) setTimeout(poll, 5_000);
+    };
+    setTimeout(poll, 2_000);
   }
 }
 
