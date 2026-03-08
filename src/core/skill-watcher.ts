@@ -4,6 +4,7 @@ import { join, resolve, basename } from 'node:path';
 import chokidar from 'chokidar';
 import { parseSkillFile } from './skill-parser.js';
 import type { SkillDefinition } from './skill-parser.js';
+import { onSkillFileCompat, onSkillFileRemoved, initSkillRegistry } from '../skills/compat-watcher.js';
 
 const DEBOUNCE_MS = 50;
 const SKILL_FILENAME = 'SKILL.md';
@@ -21,6 +22,8 @@ class SkillWatcher extends EventEmitter {
   }
 
   watch(): void {
+    initSkillRegistry();
+
     this.watcher = chokidar.watch(this.skillsDir, {
       persistent: true,
       ignoreInitial: false,
@@ -107,6 +110,8 @@ class SkillWatcher extends EventEmitter {
       this.fileToCommand.set(filePath, skill.command);
 
       this.emit(isUpdate ? 'skill:updated' : 'skill:loaded', skill);
+
+      void onSkillFileCompat(filePath);
     } catch {
       // Ignore unparseable or inaccessible files
     }
@@ -122,6 +127,7 @@ class SkillWatcher extends EventEmitter {
         this.emit('skill:removed', skill);
       }
     }
+    onSkillFileRemoved(filePath);
   }
 
   private scanForSkills(dirPath: string): void {

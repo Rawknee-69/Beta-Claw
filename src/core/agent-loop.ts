@@ -1,11 +1,14 @@
 import type { IProviderAdapter, CompletionResponse } from '../providers/interface.js';
 import type { ModelEntry } from './model-catalog.js';
-import { TOOLS } from './tools.js';
-import { ToolExecutor } from './tool-executor.js';
+import { TOOLS, type ToolDefinition } from './tools.js';
+import { ToolExecutor, type ApprovalCallback } from './tool-executor.js';
 import { trimHistory, type Message } from './token-budget.js';
 import type { MicroClawDB } from '../db.js';
 import type { SandboxRunOptions } from '../execution/sandbox.js';
 import { hookRegistry } from '../hooks/hook-registry.js';
+import { skillRegistry } from '../skills/skill-registry.js';
+import { runSkillEphemeral } from '../execution/ephemeral-sandbox.js';
+import { BROWSER_TOOL_DEFINITION } from '../browser/browser-tool.js';
 
 const MAX_ITERATIONS = 10;
 
@@ -19,16 +22,31 @@ export interface LoopConfig {
   sessionKey?: string;
   sandboxOpts: SandboxRunOptions;
   onToolCall?: (name: string) => void;
+  onApprovalRequired?: ApprovalCallback;
   maxIterations?: number;
+  activeSkillName?: string;
+  useEphemeral?: boolean;
 }
 
 interface ToolCall { name: string; args: Record<string, unknown> }
 
 export async function agentLoop(messages: Message[], cfg: LoopConfig): Promise<string> {
   const exec = new ToolExecutor(cfg.groupId, process.cwd(), cfg.sandboxOpts);
+  if (cfg.onApprovalRequired) exec.onApprovalRequired = cfg.onApprovalRequired;
   const max = cfg.maxIterations ?? MAX_ITERATIONS;
   let hist = [...messages];
   const sessionKey = cfg.sessionKey ?? 'main';
+
+  // Determine if this skill run should use ephemeral sandbox
+  const activeSkill = cfg.activeSkillName;
+  const skillEntry  = activeSkill ? skillRegistry.get(activeSkill) : undefined;
+  const useEphemeral = skillEntry?.status === 'converted' || cfg.useEphemeral;
+
+  // Build tool list: include browser tool if the active skill needs it
+  const tools: ToolDefinition[] = [...TOOLS];
+  if (skillEntry?.meta.allowedTools.includes('browser') || !activeSkill) {
+    tools.push(BROWSER_TOOL_DEFINITION);
+  }
 
   for (let i = 0; i < max; i++) {
     const trimmed = trimHistory(hist, cfg.model.id, cfg.systemPrompt);
@@ -40,7 +58,7 @@ export async function agentLoop(messages: Message[], cfg: LoopConfig): Promise<s
         messages: trimmed,
         maxTokens: 2048,
         systemPrompt: cfg.systemPrompt,
-        tools: TOOLS,
+        tools,
       });
     } catch (e) {
       return `Provider error: ${e instanceof Error ? e.message : String(e)}`;
@@ -55,7 +73,14 @@ export async function agentLoop(messages: Message[], cfg: LoopConfig): Promise<s
     const resultLines: string[] = [];
     for (const call of calls) {
       cfg.onToolCall?.(call.name);
-      const rawResult = await exec.run(call.name, call.args);
+
+      let rawResult: string;
+      if (useEphemeral && call.name === 'exec' && activeSkill) {
+        rawResult = await runSkillEphemeral(activeSkill, call.args['cmd'] as string);
+      } else {
+        rawResult = await exec.run(call.name, call.args);
+      }
+
       const finalResult = hookRegistry.applyToolResult({
         type: 'tool_result', toolName: call.name, result: rawResult, sessionKey,
       });

@@ -3,10 +3,16 @@ import path from 'path';
 import type { SandboxRunOptions } from '../execution/sandbox.js';
 import { sandboxedExec } from '../execution/sandbox.js';
 import { PATHS } from './paths.js';
+import { scoreSuspicion, formatSuspicionWarning } from '../security/suspicious-command.js';
+import { runBrowserAction } from '../browser/browser-tool.js';
 
 const BLOCKED = ['rm -rf /', 'mkfs', ':(){', '> /dev/sda', 'dd if=/dev/zero'];
 
+export type ApprovalCallback = (warning: string) => Promise<boolean>;
+
 export class ToolExecutor {
+  onApprovalRequired?: ApprovalCallback;
+
   constructor(
     private groupId: string,
     private cwd: string = process.cwd(),
@@ -24,6 +30,7 @@ export class ToolExecutor {
         case 'web_fetch':    return await this.webFetch(args['url'] as string, args['method'] as string | undefined, args['headers'] as Record<string,string> | undefined, args['body'] as string | undefined);
         case 'memory_read':  return this.memoryRead();
         case 'memory_write': return this.memoryWrite(args['content'] as string);
+        case 'browser':      return await runBrowserAction(args);
         default:             return `Unknown tool: ${name}`;
       }
     } catch (e) {
@@ -51,6 +58,19 @@ export class ToolExecutor {
     for (const b of BLOCKED) {
       if (cmd.includes(b)) return 'Blocked: dangerous command pattern detected';
     }
+
+    const suspicion = scoreSuspicion(cmd);
+
+    if (suspicion.blocked) {
+      return `🚫 BLOCKED: ${suspicion.reasons.join(', ')}\nCommand refused: ${cmd.slice(0, 200)}`;
+    }
+
+    if (suspicion.askUser && this.onApprovalRequired) {
+      const warning  = formatSuspicionWarning(cmd, suspicion);
+      const approved = await this.onApprovalRequired(warning);
+      if (!approved) return 'Command cancelled by user.';
+    }
+
     return sandboxedExec(cmd, cwd ?? this.cwd, this.sandboxOpts, timeout);
   }
 

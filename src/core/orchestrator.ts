@@ -21,6 +21,9 @@ import { extractAndPersist } from '../memory/post-turn-extractor.js';
 import { hookRegistry } from '../hooks/hook-registry.js';
 import { stopAllContainers, DEFAULT_SANDBOX_CONFIG, type SandboxRunOptions } from '../execution/sandbox.js';
 import { z } from 'zod';
+import { initGmailManager, gmailManager } from '../gmail/gmail-manager.js';
+import { browserManager } from '../browser/browser-manager.js';
+import { scheduleClawHubSync, stopClawHubSync } from '../skills/clawhub-sync.js';
 
 const InboundMessageSchema = z.object({
   id: z.string(),
@@ -101,6 +104,9 @@ class Orchestrator extends EventEmitter {
     this.running = true;
     this.logger.info({ profile: this.config.profile }, 'Orchestrator starting');
 
+    // Gmail manager (loads saved accounts)
+    initGmailManager();
+
     this.skillWatcher.watch();
     const availableProviderIds = new Set(this.registry.listIds());
     this.catalog = DEFAULT_CATALOG.filter(m => availableProviderIds.has(m.provider_id));
@@ -157,6 +163,18 @@ class Orchestrator extends EventEmitter {
       timestamp: new Date(), messages: [], context: {},
     });
 
+    // Start Gmail watches for all registered accounts
+    for (const acct of gmailManager.listAccounts()) {
+      if (acct.deliverTo) {
+        await gmailManager.startWatch(acct.account).catch(e =>
+          this.logger.warn({ err: e, account: acct.account }, 'Gmail watch failed'),
+        );
+      }
+    }
+
+    // ClawHub background sync (every 24h, checks for skill updates)
+    scheduleClawHubSync();
+
     this.processPendingIpc();
     this.logger.info('Orchestrator started — event-driven with agent loop');
   }
@@ -169,11 +187,13 @@ class Orchestrator extends EventEmitter {
     this.scheduler?.stop();
     this.heartbeatScheduler?.stop();
     this.skillWatcher.close();
+    stopClawHubSync();
 
     for (const [, channel] of this.channels) {
       await channel.disconnect();
     }
 
+    await browserManager.closeAll();
     await stopAllContainers();
     this.db.close();
     this.emit('event', {
@@ -361,8 +381,8 @@ class Orchestrator extends EventEmitter {
 }
 
 // Cleanup on process exit
-process.on('SIGTERM', async () => { await stopAllContainers(); process.exit(0); });
-process.on('SIGINT',  async () => { await stopAllContainers(); process.exit(0); });
+process.on('SIGTERM', async () => { await browserManager.closeAll(); await stopAllContainers(); process.exit(0); });
+process.on('SIGINT',  async () => { await browserManager.closeAll(); await stopAllContainers(); process.exit(0); });
 
 export { Orchestrator };
 export type { OrchestratorEvent, OrchestratorConfig };
