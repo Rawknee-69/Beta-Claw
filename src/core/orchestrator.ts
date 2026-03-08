@@ -88,6 +88,7 @@ const VC = {
   magenta: '\x1b[35m',
   red:     '\x1b[91m',
   gray:    '\x1b[90m',
+  blue:    '\x1b[94m',
 };
 function vlog(tag: string, color: string, msg: string, detail?: string): void {
   const ts = new Date().toTimeString().slice(0, 8);
@@ -95,6 +96,20 @@ function vlog(tag: string, color: string, msg: string, detail?: string): void {
   const tsStr  = `${VC.gray}${ts}${VC.reset}`;
   const detStr = detail ? ` ${VC.dim}${detail}${VC.reset}` : '';
   console.log(`${tsStr} ${tagStr} ${msg}${detStr}`);
+}
+
+function formatToolDetail(name: string, args: Record<string, unknown>): string {
+  switch (name) {
+    case 'exec':       return `$ ${String(args['cmd'] ?? '')}`;
+    case 'write':      return `→ ${String(args['path'] ?? '')} (${String(args['content'] ?? '').length} chars)`;
+    case 'read':       return `← ${String(args['path'] ?? '')}`;
+    case 'list':       return `dir ${String(args['path'] ?? '')}`;
+    case 'web_search': return `🔍 ${String(args['query'] ?? '')}`;
+    case 'web_fetch':  return `GET ${String(args['url'] ?? '')}`;
+    case 'browser':    return `[${String(args['action'] ?? '')}] ${String(args['url'] ?? args['selector'] ?? args['text'] ?? args['script'] ?? '')}`;
+    case 'memory_write': return String(args['content'] ?? '').slice(0, 80);
+    default:           return JSON.stringify(args).slice(0, 120);
+  }
 }
 
 class Orchestrator extends EventEmitter {
@@ -215,7 +230,10 @@ class Orchestrator extends EventEmitter {
     });
     this.heartbeatScheduler.start();
 
-    // Init one-shot scheduler
+    // Init one-shot scheduler — deliver the message DIRECTLY to the channel.
+    // Do NOT pass through handleMessage/agentLoop: the AI already wrote the
+    // exact reminder text; running it through the LLM would cause it to be
+    // interpreted as a new user request and re-schedule itself infinitely.
     oneShotScheduler.init(async (schedMsg) => {
       const prefix = schedMsg.groupId.split('_')[0] ?? '';
       const targetChannel = Array.from(this.channels.values()).find(c =>
@@ -224,14 +242,13 @@ class Orchestrator extends EventEmitter {
         (c.id === 'whatsapp'),
       ) ?? Array.from(this.channels.values())[0];
       if (targetChannel) {
-        const result = await this.handleMessage({
-          id: schedMsg.id,
-          groupId: schedMsg.groupId,
-          senderId: schedMsg.senderId,
-          content: schedMsg.content,
-          timestamp: schedMsg.timestamp,
-        }, targetChannel).catch(e => ({ response: `Error: ${e instanceof Error ? e.message : String(e)}`, modelId: '' }));
-        await targetChannel.send({ groupId: schedMsg.groupId, content: result.response });
+        if (this.config.verbose) {
+          vlog('SCHED', VC.magenta, schedMsg.groupId, `"${schedMsg.content.slice(0, 60)}"`);
+        }
+        await targetChannel.send({ groupId: schedMsg.groupId, content: schedMsg.content })
+          .catch(e => this.logger.warn({ err: e, groupId: schedMsg.groupId }, 'One-shot delivery failed'));
+      } else {
+        this.logger.warn({ groupId: schedMsg.groupId }, 'One-shot: no channel found for delivery');
       }
     });
 
@@ -348,6 +365,12 @@ class Orchestrator extends EventEmitter {
     this.db.updateGroupLastActive(msg.groupId);
 
     const history = this.db.getMessages(msg.groupId, 40);
+
+    if (this.config.verbose) {
+      const ctxChars = history.reduce((n, m) => n + m.content.length, 0);
+      vlog('CTX', VC.blue, `${history.length} msgs`, `~${ctxChars} chars from ${msg.groupId.slice(0, 20)}`);
+    }
+
     const messages = history.map(m => ({
       role: (m.sender_id === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
       content: m.content,
@@ -410,11 +433,29 @@ class Orchestrator extends EventEmitter {
       senderId: msg.senderId,
       sessionKey,
       sandboxOpts,
-      onToolCall: (name) => {
+      onLLMCall: (iter, msgs) => {
+        if (this.config.verbose) {
+          vlog('LLM', VC.cyan, `round ${iter + 1}`, `model=${sel.model.id}  msgs=${msgs}`);
+        }
+      },
+      onToolStart: (name, args) => {
         this.logger.info({ tool: name }, 'Tool called');
-        if (this.config.verbose) vlog('TOOL', VC.yellow, name);
+        if (this.config.verbose) {
+          const detail = formatToolDetail(name, args);
+          vlog('TOOL', VC.yellow, `→ ${name}`, detail);
+        }
+      },
+      onToolCall: (name, _args, result) => {
+        if (this.config.verbose) {
+          const resultPreview = result.length > 400 ? result.slice(0, 400) + '…' : result;
+          vlog('RSLT', VC.gray, `← ${name}`, resultPreview.replace(/\n/g, ' ↵ '));
+        }
       },
     });
+
+    if (this.config.verbose) {
+      vlog('DONE', VC.green, `${response.length} chars`, `model=${sel.model.id}`);
+    }
 
     const responseId = randomUUID();
     this.db.insertMessage({

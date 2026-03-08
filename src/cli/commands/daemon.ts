@@ -91,10 +91,14 @@ async function startDaemon(options: { foreground?: boolean; verbose?: boolean })
     const { DiscordChannel } = await import('../../channels/discord.js');
 
     const { DB_PATH } = await import('../../core/paths.js');
+    // Pin the absolute DB path into the environment so every child process
+    // spawned by exec (e.g. "microclaw schedule once") resolves the same DB
+    // regardless of the cwd it is launched from.
+    process.env['MICROCLAW_DB'] = DB_PATH;
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     const db = new MicroClawDB(DB_PATH);
     const orchestrator = new Orchestrator({
-      logLevel: options.verbose ? 'debug' : 'info',
+      logLevel: options.verbose ? 'warn' : 'info',
       verbose: options.verbose ?? false,
     });
 

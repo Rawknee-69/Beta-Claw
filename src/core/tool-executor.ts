@@ -64,10 +64,12 @@ export class ToolExecutor {
   }
 
   private write(filePath: string, content: string): string {
-    const abs = this.resolveWritePath(filePath);
+    const abs    = this.resolveWritePath(filePath);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, content, 'utf-8');
-    return `Written: ${abs} (${content.length} bytes)`;
+    const rel    = path.relative(this.workspaceDir, abs);
+    const absStr = path.resolve(abs);
+    return `Written: ${rel} (${content.length} bytes)\nFull path: ${absStr}\nTo run: exec cmd="node ${rel}"`;
   }
 
   private async exec(cmd: string, cwd?: string, timeout = 30_000): Promise<string> {

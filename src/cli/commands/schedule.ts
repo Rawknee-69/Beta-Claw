@@ -7,7 +7,9 @@ dotenv.config();
 async function getDB() {
   const { MicroClawDB } = await import('../../db.js');
   const { DB_PATH } = await import('../../core/paths.js');
-  return new MicroClawDB(DB_PATH);
+  // Prefer the env var set by the daemon so the path is always absolute
+  // regardless of the cwd this subprocess was launched from.
+  return new MicroClawDB(process.env['MICROCLAW_DB'] ?? DB_PATH);
 }
 
 const scheduleCommand = new Command('schedule')
@@ -136,6 +138,20 @@ scheduleCommand
   .requiredOption('--id <id>', 'Task ID')
   .action((opts: { id: string }) => {
     console.log(oneShotScheduler.cancel(opts.id) ? `Cancelled: ${opts.id}` : `Not found: ${opts.id}`);
+  });
+
+scheduleCommand
+  .command('cancel-group')
+  .description('Cancel all pending one-shot reminders for a group (removes from DB before they fire)')
+  .requiredOption('--group <groupId>', 'Target group/chat')
+  .action(async (opts: { group: string }) => {
+    const db = await getDB();
+    try {
+      const count = db.cancelPendingOnceTasksByGroup(opts.group);
+      console.log(`Cancelled ${count} pending reminder(s) for group ${opts.group}`);
+    } finally {
+      db.close();
+    }
   });
 
 export { scheduleCommand };

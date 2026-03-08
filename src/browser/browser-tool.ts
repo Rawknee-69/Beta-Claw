@@ -44,16 +44,40 @@ export async function runBrowserAction(args: Record<string, unknown>): Promise<s
         const page = await getPage(sessionId, tabId, headless);
         await page.goto(args['url'] as string, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-        // Extract visible text so the AI has real page content to reason about
+        // Give JS-rendered content a moment to appear (best-effort, don't fail if timeout)
+        try {
+          await page.waitForLoadState('networkidle', { timeout: 5_000 });
+        } catch { /* ignore timeout — proceed with whatever is loaded */ }
+
+        // Extract visible text
         let pageText = '';
         try {
           pageText = await page.innerText('body');
         } catch { /* ignore if body unavailable */ }
-        const preview = pageText.trim().slice(0, 4000);
+        const preview = pageText.trim().slice(0, 3000);
+
+        // Extract links: [link text → url] for first 40 anchors with non-empty href
+        type LinkEntry = { text: string; href: string };
+        let links: LinkEntry[] = [];
+        try {
+          // Passed as a string so tsc doesn't try to type-check browser globals
+          const extractScript = `
+            Array.from(document.querySelectorAll('a[href]'))
+              .map(a => ({ text: a.innerText.trim().replace(/\\s+/g, ' ').slice(0, 80), href: a.href }))
+              .filter(l => l.href && !l.href.startsWith('javascript:') && l.text)
+              .slice(0, 40)
+          `;
+          links = await page.evaluate(extractScript) as LinkEntry[];
+        } catch { /* ignore */ }
+
+        const linkBlock = links.length
+          ? '\n\nLinks found:\n' + links.map(l => `${l.text} → ${l.href}`).join('\n')
+          : '';
 
         return [
           `Navigated to: ${page.url()}`,
-          preview ? `\nPage content:\n${preview}${pageText.length > 4000 ? '\n[truncated]' : ''}` : '',
+          preview ? `\nPage content:\n${preview}${pageText.trim().length > 3000 ? '\n[truncated]' : ''}` : '',
+          linkBlock,
         ].join('');
       }
 

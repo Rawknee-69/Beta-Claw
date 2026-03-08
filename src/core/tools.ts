@@ -24,11 +24,11 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'write',
-    description: 'Write content to a file. Creates parent directories.',
+    description: 'Write content to a file inside the group workspace. Relative paths resolve to the workspace root (e.g. "skills/weather.js" → .workspaces/{groupId}/skills/weather.js). Creates parent directories automatically.',
     input_schema: {
       type: 'object',
       properties: {
-        path:    { type: 'string', description: 'File path' },
+        path:    { type: 'string', description: 'Relative path from workspace root (e.g. "skills/weather.js")' },
         content: { type: 'string', description: 'Content to write' },
       },
       required: ['path', 'content'],
@@ -36,12 +36,12 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'exec',
-    description: 'Run a shell command via bash -c. Returns stdout, stderr, exit code.',
+    description: 'Run a shell command via bash -c. Default working directory is the group workspace (.workspaces/{groupId}/), so use relative paths (e.g. "node skills/weather.js"). Returns stdout, stderr, exit code.',
     input_schema: {
       type: 'object',
       properties: {
-        cmd:     { type: 'string', description: 'Shell command' },
-        cwd:     { type: 'string', description: 'Working directory (optional)' },
+        cmd:     { type: 'string', description: 'Shell command (use relative paths — cwd is workspace root)' },
+        cwd:     { type: 'string', description: 'Override working directory (optional absolute path)' },
         timeout: { type: 'number', description: 'Timeout ms, default 30000' },
       },
       required: ['cmd'],

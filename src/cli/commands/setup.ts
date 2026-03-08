@@ -338,6 +338,8 @@ async function pairWhatsAppNow(): Promise<void> {
       let currentSock: Record<string, unknown> | null = null;
 
       const loggedOutCode = (DisconnectReason as unknown as Record<string, unknown>)['loggedOut'];
+      // 515 = restartRequired — often happens right after a successful scan; do NOT wipe auth.
+      const restartRequiredCode = 515;
 
       const globalTimeout = setTimeout(() => {
         if (!done) {
@@ -347,11 +349,10 @@ async function pairWhatsAppNow(): Promise<void> {
         }
       }, 180_000);
 
-      // Each connect() call creates a completely fresh auth state.
-      // On retry we wipe the auth dir first — stale partial creds from a failed
-      // handshake cause WhatsApp to show "try again later" on the next scan.
-      async function connect(): Promise<void> {
-        if (qrCount > 0) {
+      // When reconnectAfterClose is true, we got a 515/restart — keep auth so the scan can complete.
+      // When false and qrCount > 0, wipe stale auth so the next QR is fresh.
+      async function connect(reconnectAfterClose = false): Promise<void> {
+        if (qrCount > 0 && !reconnectAfterClose) {
           try {
             fs.rmSync(AUTH_DIR, { recursive: true, force: true });
             fs.mkdirSync(AUTH_DIR, { recursive: true });
@@ -362,7 +363,6 @@ async function pairWhatsAppNow(): Promise<void> {
         const { state: freshAuth, saveCreds: freshSave } =
           await (useMultiFileAuthState as (dir: string) => Promise<{ state: unknown; saveCreds: () => void }>)(AUTH_DIR);
 
-        // Do NOT use printQRInTerminal — it is deprecated. We render QR ourselves.
         const sock = makeWASocket({
           version,
           auth: freshAuth,
@@ -382,23 +382,24 @@ async function pairWhatsAppNow(): Promise<void> {
             console.log('\n');
             qrTerminal.generate(u['qr'] as string, { small: true });
             console.log('\n  Open WhatsApp → Settings → Linked Devices → Link a Device');
-            console.log('  Scan the QR code above. Waiting...\n');
+            console.log('  Scan the QR code above. If it refreshes, scan the newest one.');
+            console.log('  Keep this terminal open until you see "WhatsApp paired successfully".\n');
           }
 
           if (u['connection'] === 'open') {
             done = true;
             clearTimeout(globalTimeout);
             console.log('\n  ✓ WhatsApp paired successfully!\n');
-            // Give creds a moment to flush to disk before we close the socket
+            // Give creds time to flush to disk before closing the socket
             setTimeout(() => {
               (sock['end'] as (() => void) | undefined)?.();
               resolve();
-            }, 1500);
+            }, 3000);
           }
 
           if (u['connection'] === 'close') {
             const errObj = (u['lastDisconnect'] as Record<string, unknown> | undefined)?.['error'] as Record<string, unknown> | undefined;
-            const statusCode = (errObj?.['output'] as Record<string, unknown> | undefined)?.['statusCode'];
+            const statusCode = (errObj?.['output'] as Record<string, unknown> | undefined)?.['statusCode'] as number | undefined;
 
             if (statusCode === loggedOutCode) {
               done = true;
@@ -407,10 +408,15 @@ async function pairWhatsAppNow(): Promise<void> {
               return;
             }
 
-            // Intermediate close (e.g. 515 stream error) is normal during the QR handshake.
-            // Wait 2s before reconnecting with a fresh auth state.
+            // 515 / restartRequired often happens right after user scans — reconnect WITHOUT wiping auth
+            // so the saved creds are used and we get 'open'. Only wipe when showing a fresh QR (no reconnectAfterClose).
             if (!done) {
-              setTimeout(() => { void connect(); }, 2000);
+              const isRestartRequired = statusCode === restartRequiredCode;
+              const delayMs = isRestartRequired ? 5000 : 3000;
+              if (isRestartRequired) {
+                console.log('\n  Reconnecting with your credentials (do not close)...\n');
+              }
+              setTimeout(() => { void connect(isRestartRequired); }, delayMs);
             }
           }
         });
@@ -421,13 +427,13 @@ async function pairWhatsAppNow(): Promise<void> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('timed out')) {
-      console.log('  WhatsApp pairing timed out. Run "microclaw start" to try again.');
+      console.log('  WhatsApp pairing timed out.');
     } else if (msg.includes('not available') || msg.includes('Cannot find module')) {
       console.log('  WhatsApp (baileys) is not installed. Run: npm install @whiskeysockets/baileys');
     } else {
       console.log(`  WhatsApp pairing failed: ${msg}`);
-      console.log('  You can pair later with "microclaw start".');
     }
+    console.log('  You can pair later by running "microclaw start" — the listener stays open and will show a QR code.');
   }
 }
 

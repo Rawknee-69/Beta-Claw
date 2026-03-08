@@ -73,7 +73,6 @@ export class TaskScheduler extends EventEmitter {
 
   private async runTask(task: ScheduledTask): Promise<void> {
     console.log(`[cron] Running task: ${task.name} (${task.id})`);
-    this.db.updateTaskLastRunOnly(task.id, Date.now());
 
     this.emit('task:fired', {
       taskId: task.id,
@@ -82,7 +81,17 @@ export class TaskScheduler extends EventEmitter {
       scheduledTime: new Date(),
     } satisfies TaskFiredEvent);
 
-    if (!this.registry || !this.catalog) return;
+    if (!this.registry || !this.catalog) {
+      console.warn(`[cron] Task ${task.id} skipped — no registry/catalog`);
+      return;
+    }
+
+    if (!this.onMessage) {
+      console.warn(`[cron] Task ${task.id} has no delivery channel — onMessage not configured`);
+      return;
+    }
+
+    let response: string | null = null;
 
     try {
       const sel = selectModel(this.catalog, task.instruction);
@@ -101,16 +110,27 @@ export class TaskScheduler extends EventEmitter {
         sessionKey: `cron-${task.id}`, agentId: 'cron', isMain: false,
         elevated: 'off', groupId: task.group_id, cfg: DEFAULT_SANDBOX_CONFIG,
       };
-      const response = await agentLoop(
+      response = await agentLoop(
         [{ role: 'user', content: `[SCHEDULED TASK: ${task.name}]\n${task.instruction}` }],
         { provider, model: sel.model, systemPrompt, db: this.db, groupId: task.group_id, sandboxOpts: schedulerSandboxOpts },
       );
-
-      if (response && this.onMessage) {
-        await this.onMessage(task.group_id, response);
-      }
     } catch (e) {
-      console.error(`[cron] Task ${task.id} failed:`, e);
+      console.error(`[cron] Task ${task.id} agentLoop failed:`, e);
+      return;
+    }
+
+    if (!response) {
+      console.warn(`[cron] Task ${task.id} produced empty response — not delivering`);
+      return;
+    }
+
+    try {
+      await this.onMessage(task.group_id, response);
+      // Mark as run only after successful delivery
+      this.db.updateTaskLastRunOnly(task.id, Date.now());
+      console.log(`[cron] Task ${task.id} delivered to ${task.group_id}`);
+    } catch (e) {
+      console.error(`[cron] Task ${task.id} delivery to ${task.group_id} failed:`, e);
     }
   }
 

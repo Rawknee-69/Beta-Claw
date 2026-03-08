@@ -90,22 +90,23 @@ export class WhatsAppChannel implements IChannel {
           if (update.connection === 'open') {
             everConnected = true;
             this.connected = true;
-            console.log('[whatsapp] Connected');
+            console.log('[whatsapp] Connected ✓');
           }
           if (update.connection === 'close') {
             this.connected = false;
             const statusCode = update.lastDisconnect?.error?.output?.statusCode;
+            const errMsg = update.lastDisconnect?.error?.message ?? 'unknown';
             if (statusCode === DisconnectReason.loggedOut) {
-              console.log('[whatsapp] Logged out. Delete .micro/whatsapp-auth and restart.');
+              console.log('[whatsapp] Logged out — delete .micro/whatsapp-auth and restart.');
               return;
             }
             const isRestartRequired = statusCode === RESTART_REQUIRED;
-            if (isRestartRequired) {
-              console.log('[whatsapp] Reconnecting with your credentials...');
-            } else {
-              console.log('[whatsapp] Reconnecting...');
-            }
-            setTimeout(() => void startSocket(isRestartRequired), isRestartRequired ? 5000 : 3000);
+            const delay = isRestartRequired ? 5000 : 3000;
+            console.log(`[whatsapp] Disconnected (code=${statusCode ?? '?'} reason="${errMsg}") — reconnecting in ${delay}ms`);
+            setTimeout(() => void startSocket(isRestartRequired), delay);
+          }
+          if (update.connection === 'connecting') {
+            console.log('[whatsapp] Connecting…');
           }
         });
 

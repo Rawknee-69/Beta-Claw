@@ -596,6 +596,13 @@ class MicroClawDB {
     this.db.prepare('UPDATE pending_once_tasks SET picked_up = 1 WHERE id = ?').run(id);
   }
 
+  cancelPendingOnceTasksByGroup(groupId: string): number {
+    const r = this.db
+      .prepare('DELETE FROM pending_once_tasks WHERE group_id = ? AND picked_up = 0')
+      .run(groupId);
+    return r.changes as number;
+  }
+
   // --- Snapshots ---
 
   insertSnapshot(snapshot: SnapshotInput): void {

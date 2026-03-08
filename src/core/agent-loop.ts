@@ -21,7 +21,9 @@ export interface LoopConfig {
   senderId?: string;
   sessionKey?: string;
   sandboxOpts: SandboxRunOptions;
-  onToolCall?: (name: string) => void;
+  onLLMCall?: (iteration: number, messageCount: number) => void;
+  onToolStart?: (name: string, args: Record<string, unknown>) => void;
+  onToolCall?: (name: string, args: Record<string, unknown>, result: string) => void;
   onApprovalRequired?: ApprovalCallback;
   maxIterations?: number;
   activeSkillName?: string;
@@ -50,6 +52,7 @@ export async function agentLoop(messages: Message[], cfg: LoopConfig): Promise<s
 
   for (let i = 0; i < max; i++) {
     const trimmed = trimHistory(hist, cfg.model.id, cfg.systemPrompt);
+    cfg.onLLMCall?.(i, trimmed.length);
 
     let response: CompletionResponse;
     try {
@@ -72,7 +75,7 @@ export async function agentLoop(messages: Message[], cfg: LoopConfig): Promise<s
 
     const resultLines: string[] = [];
     for (const call of calls) {
-      cfg.onToolCall?.(call.name);
+      cfg.onToolStart?.(call.name, call.args);
 
       let rawResult: string;
       if (useEphemeral && call.name === 'exec' && activeSkill) {
@@ -84,7 +87,9 @@ export async function agentLoop(messages: Message[], cfg: LoopConfig): Promise<s
       const finalResult = hookRegistry.applyToolResult({
         type: 'tool_result', toolName: call.name, result: rawResult, sessionKey,
       });
-      resultLines.push(`[${call.name}] ${typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult)}`);
+      const finalStr = typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult);
+      cfg.onToolCall?.(call.name, call.args, finalStr);
+      resultLines.push(`[${call.name}] ${finalStr}`);
     }
 
     hist.push({ role: 'assistant', content: response.content || `[Used tools: ${calls.map(c => c.name).join(', ')}]` });
