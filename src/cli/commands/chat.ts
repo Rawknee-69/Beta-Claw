@@ -15,6 +15,8 @@ import { buildSystemPrompt } from '../../core/prompt-builder.js';
 import { TaskScheduler } from '../../scheduler/task-scheduler.js';
 import { SkillWatcher } from '../../core/skill-watcher.js';
 import { registerAvailableProviders } from '../../core/provider-init.js';
+import type { HistoryMessage } from '../../core/complexity-estimator.js';
+import { hookRegistry } from '../../hooks/hook-registry.js';
 
 interface ChatOptions {
   group?: string;
@@ -112,7 +114,15 @@ async function startChat(options: ChatOptions): Promise<void> {
   });
   scheduler.start();
 
-  console.log('\nMicroClaw v2.0 \u2014 Interactive Chat');
+  await hookRegistry.load();
+  await hookRegistry.fire({
+    type: 'gateway', action: 'startup',
+    sessionKey: 'cli', timestamp: new Date(), messages: [], context: {},
+  });
+
+  let lastTurnUsedTool = false;
+
+  console.log('\nMicroClaw v3.0 \u2014 Interactive Chat');
   console.log(`Providers: ${registered.join(', ')}`);
   console.log(`Models available: ${catalog.length}`);
   console.log(`Group: ${groupId}`);
@@ -167,17 +177,19 @@ async function startChat(options: ChatOptions): Promise<void> {
   });
 
   async function processMessage(content: string): Promise<void> {
-    const sel = selectModel(catalog, content);
+    const history = db.getMessages(groupId, 20);
+    const historyForTier: HistoryMessage[] = history.map(m => ({
+      role: (m.sender_id === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+      content: m.content,
+    }));
+
+    const sel = selectModel(catalog, content, { history: historyForTier, recentToolUse: lastTurnUsedTool });
     if (!sel) { console.log('\n[No model available]\n'); rl.prompt(); return; }
     const provider = registry.get(sel.model.provider_id);
     if (!provider) { console.log(`\n[Provider ${sel.model.provider_id} unavailable]\n`); rl.prompt(); return; }
 
-    const history = db.getMessages(groupId, 20);
     const messages = [
-      ...history.map(m => ({
-        role: (m.sender_id === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
-        content: m.content,
-      })),
+      ...historyForTier,
       { role: 'user' as const, content },
     ];
 
@@ -200,6 +212,7 @@ async function startChat(options: ChatOptions): Promise<void> {
         sessionKey: 'cli', agentId: 'cli', isMain: true,
         elevated: 'off', groupId, cfg: DEFAULT_SANDBOX_CONFIG,
       };
+      let toolUsedThisTurn = false;
       const response = await agentLoop(messages, {
         provider,
         model: sel.model,
@@ -207,8 +220,12 @@ async function startChat(options: ChatOptions): Promise<void> {
         db,
         groupId,
         sandboxOpts: cliSandboxOpts,
-        onToolCall: (name) => process.stdout.write(`\n  \u21B3 ${name}...`),
+        onToolCall: (name) => {
+          toolUsedThisTurn = true;
+          process.stdout.write(`\n  \u21B3 ${name}...`);
+        },
       });
+      lastTurnUsedTool = toolUsedThisTurn;
 
       console.log('\n' + response + '\n');
 

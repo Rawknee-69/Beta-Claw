@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { randomUUID } from 'node:crypto';
 import dotenv from 'dotenv';
+import { oneShotScheduler, OneShotScheduler } from '../../execution/one-shot-scheduler.js';
 dotenv.config();
 
 async function getDB() {
@@ -91,6 +92,42 @@ scheduleCommand
     } finally {
       db.close();
     }
+  });
+
+scheduleCommand
+  .command('once')
+  .description('Schedule a one-shot message after a delay')
+  .requiredOption('--group <groupId>', 'Target group/chat')
+  .requiredOption('--delay <delay>', 'Delay (e.g. "30 seconds", "5 minutes")')
+  .requiredOption('--message <message>', 'Message to deliver')
+  .action((opts: { group: string; delay: string; message: string }) => {
+    const ms = OneShotScheduler.parseDelay(opts.delay);
+    if (!ms)              { console.error('Invalid delay format'); process.exit(1); }
+    if (ms < 10_000)      { console.error('Minimum: 10 seconds');  process.exit(1); }
+    if (ms > 604_800_000) { console.error('Maximum: 7 days');      process.exit(1); }
+    const id = oneShotScheduler.scheduleOnce(opts.group, opts.message, ms);
+    console.log(`Scheduled: ${id}`);
+  });
+
+scheduleCommand
+  .command('list-pending')
+  .description('List pending one-shot tasks')
+  .option('--group <groupId>', 'Filter by group')
+  .action((opts: { group?: string }) => {
+    const tasks = oneShotScheduler.list(opts.group);
+    if (!tasks.length) { console.log('No pending tasks.'); return; }
+    tasks.forEach(t => {
+      const s = Math.max(0, Math.round((t.runAt - Date.now()) / 1000));
+      console.log(`${t.id}: "${t.message.slice(0, 60)}" in ${s}s`);
+    });
+  });
+
+scheduleCommand
+  .command('cancel')
+  .description('Cancel a pending one-shot task by ID')
+  .requiredOption('--id <id>', 'Task ID')
+  .action((opts: { id: string }) => {
+    console.log(oneShotScheduler.cancel(opts.id) ? `Cancelled: ${opts.id}` : `Not found: ${opts.id}`);
   });
 
 export { scheduleCommand };

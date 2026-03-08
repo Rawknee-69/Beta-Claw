@@ -43,7 +43,11 @@ export async function runBrowserAction(args: Record<string, unknown>): Promise<s
       case 'navigate': {
         const page = await getPage(sessionId, tabId, headless);
         await page.goto(args['url'] as string, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-        return `Navigated to: ${page.url()}`;
+
+        const screenshotPath = `/tmp/mc-nav-${Date.now()}.png`;
+        await page.screenshot({ path: screenshotPath, fullPage: false });
+
+        return `Navigated to: ${page.url()}\n[SCREENSHOT:${screenshotPath}]`;
       }
 
       case 'click': {

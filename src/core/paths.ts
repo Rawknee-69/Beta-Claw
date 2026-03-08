@@ -19,6 +19,8 @@ export const PATHS = {
   soul:       (g: string) => `groups/${g}/SOUL.md`,
   heartbeat:  (g: string) => `groups/${g}/HEARTBEAT.md`,
   boot:       (g: string) => `groups/${g}/BOOT.md`,
+  workspaces: '.workspaces',
+  workspace:  (g: string) => `.workspaces/${g}`,
 } as const;
 
 // Backward-compatible individual exports (used by files not yet migrated to PATHS)

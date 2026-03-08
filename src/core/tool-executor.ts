@@ -3,6 +3,7 @@ import path from 'path';
 import type { SandboxRunOptions } from '../execution/sandbox.js';
 import { sandboxedExec } from '../execution/sandbox.js';
 import { PATHS } from './paths.js';
+import { ensureWorkspace } from './workspace.js';
 import { scoreSuspicion, formatSuspicionWarning } from '../security/suspicious-command.js';
 import { runBrowserAction } from '../browser/browser-tool.js';
 
@@ -12,12 +13,15 @@ export type ApprovalCallback = (warning: string) => Promise<boolean>;
 
 export class ToolExecutor {
   onApprovalRequired?: ApprovalCallback;
+  private workspaceDir: string;
 
   constructor(
     private groupId: string,
     private cwd: string = process.cwd(),
     private sandboxOpts: SandboxRunOptions,
-  ) {}
+  ) {
+    this.workspaceDir = ensureWorkspace(groupId);
+  }
 
   async run(name: string, args: Record<string, unknown>): Promise<string> {
     try {
@@ -47,8 +51,16 @@ export class ToolExecutor {
     return content.length > cap ? content.slice(0, cap) + '\n[truncated]' : content;
   }
 
+  private resolveWritePath(rawPath: string): string {
+    if (path.isAbsolute(rawPath)) return rawPath;
+    if (rawPath.startsWith('.workspaces/') || rawPath.startsWith('workspaces/')) {
+      return path.resolve(rawPath);
+    }
+    return path.join(this.workspaceDir, rawPath);
+  }
+
   private write(filePath: string, content: string): string {
-    const abs = path.resolve(this.cwd, filePath);
+    const abs = this.resolveWritePath(filePath);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, content, 'utf-8');
     return `Written: ${abs} (${content.length} bytes)`;
@@ -71,7 +83,8 @@ export class ToolExecutor {
       if (!approved) return 'Command cancelled by user.';
     }
 
-    return sandboxedExec(cmd, cwd ?? this.cwd, this.sandboxOpts, timeout);
+    const effectiveCwd = cwd ?? this.workspaceDir;
+    return sandboxedExec(cmd, effectiveCwd, this.sandboxOpts, timeout);
   }
 
   private list(dirPath: string, recursive = false): string {

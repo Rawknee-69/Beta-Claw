@@ -1,5 +1,5 @@
 import type { ModelEntry } from './model-catalog.js';
-import { classifyTier, type Tier } from './complexity-estimator.js';
+import { classifyTier, type HistoryMessage, type Tier } from './complexity-estimator.js';
 
 /**
  * Model ID patterns for each tier.
@@ -44,7 +44,7 @@ const tierFallbackOrder: Record<Tier, Tier[]> = {
 export function selectModel(
   catalog: ModelEntry[],
   message: string,
-  context?: { recentToolUse?: boolean },
+  context?: { recentToolUse?: boolean; history?: HistoryMessage[] },
 ): { model: ModelEntry; tier: Tier } | null {
   if (catalog.length === 0) return null;
 

@@ -147,6 +147,24 @@ class GoogleAdapter implements IProviderAdapter {
     }
 
     const parts = candidate.content?.parts ?? [];
+    const finishReason = candidate.finishReason;
+
+    if (!candidate.content?.parts) {
+      let fallback: string;
+      if (finishReason === 'SAFETY')          fallback = '[Response blocked by safety filter]';
+      else if (finishReason === 'MAX_TOKENS') fallback = '[Response cut off: token limit]';
+      else                                    fallback = `[Empty response from model: ${finishReason ?? 'UNKNOWN'}]`;
+      return {
+        content: fallback,
+        model: req.model,
+        usage: {
+          inputTokens: parsed.usageMetadata?.promptTokenCount ?? 0,
+          outputTokens: parsed.usageMetadata?.candidatesTokenCount ?? 0,
+          totalTokens: parsed.usageMetadata?.totalTokenCount ?? 0,
+        },
+        finishReason: this.mapFinishReason(finishReason),
+      };
+    }
 
     const content = parts
       .filter(p => p.text !== undefined)
@@ -161,6 +179,20 @@ class GoogleAdapter implements IProviderAdapter {
         arguments: p.functionCall!.args as Record<string, unknown>,
       }));
 
+    if (!content.trim() && toolCalls.length === 0) {
+      const reason = finishReason ?? 'UNKNOWN';
+      return {
+        content: `[Model returned no content: ${reason}]`,
+        model: req.model,
+        usage: {
+          inputTokens: parsed.usageMetadata?.promptTokenCount ?? 0,
+          outputTokens: parsed.usageMetadata?.candidatesTokenCount ?? 0,
+          totalTokens: parsed.usageMetadata?.totalTokenCount ?? 0,
+        },
+        finishReason: this.mapFinishReason(finishReason),
+      };
+    }
+
     return {
       content,
       model: req.model,
@@ -169,7 +201,7 @@ class GoogleAdapter implements IProviderAdapter {
         outputTokens: parsed.usageMetadata?.candidatesTokenCount ?? 0,
         totalTokens: parsed.usageMetadata?.totalTokenCount ?? 0,
       },
-      finishReason: this.mapFinishReason(candidate.finishReason),
+      finishReason: this.mapFinishReason(finishReason),
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     };
   }
@@ -214,9 +246,22 @@ class GoogleAdapter implements IProviderAdapter {
           try {
             const chunk = GeminiResponseSchema.parse(JSON.parse(data));
             const candidate = chunk.candidates[0];
-            const content = candidate?.content?.parts.map((p) => p.text ?? '').join('') ?? '';
+            const streamFinishReason = candidate?.finishReason;
+
+            if (!candidate?.content?.parts) {
+              let fallback = '';
+              if (streamFinishReason === 'SAFETY')          fallback = '[Response blocked by safety filter]';
+              else if (streamFinishReason === 'MAX_TOKENS') fallback = '[Response cut off: token limit]';
+              else if (streamFinishReason)                  fallback = `[Empty response from model: ${streamFinishReason}]`;
+              if (fallback) {
+                yield { content: fallback, done: true };
+                continue;
+              }
+            }
+
+            const content = (candidate?.content?.parts ?? []).map((p) => p.text ?? '').join('');
             const isDone =
-              candidate?.finishReason === 'STOP' || candidate?.finishReason === 'MAX_TOKENS';
+              streamFinishReason === 'STOP' || streamFinishReason === 'MAX_TOKENS';
 
             yield {
               content,

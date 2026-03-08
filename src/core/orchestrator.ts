@@ -18,9 +18,11 @@ import pino from 'pino';
 import { DB_PATH } from './paths.js';
 import { MessageQueue, type QueueConfig } from '../execution/message-queue.js';
 import { withRetry, getRetryConfig } from '../execution/retry-policy.js';
-import { suggestWebSearch } from './complexity-estimator.js';
+import { suggestWebSearch, type HistoryMessage } from './complexity-estimator.js';
+import { oneShotScheduler } from '../execution/one-shot-scheduler.js';
 import { extractAndPersist } from '../memory/post-turn-extractor.js';
 import { hookRegistry } from '../hooks/hook-registry.js';
+import { sendWithInterception } from '../channels/response-interceptor.js';
 import { stopAllContainers, DEFAULT_SANDBOX_CONFIG, type SandboxRunOptions, type SandboxConfig } from '../execution/sandbox.js';
 import { z } from 'zod';
 import { initGmailManager, gmailManager } from '../gmail/gmail-manager.js';
@@ -121,22 +123,30 @@ class Orchestrator extends EventEmitter {
       if (this.config.verbose) {
         vlog('MSG', VC.cyan, `[${ch.id}] ${msg.groupId}`, `"${msg.content.slice(0, 80)}${msg.content.length > 80 ? '…' : ''}"`);
       }
-      // Use groupId (the chat JID) not senderId (participant JID) — Baileys needs the chat JID for typing presence
       await ch.sendTyping?.(msg.groupId).catch(() => {});
-      const response = await this.handleMessage(msg, ch).catch((e: unknown) => {
+      const result = await this.handleMessage(msg, ch).catch((e: unknown) => {
         this.logger.error({ err: e, groupId: msg.groupId }, 'Error processing message');
         if (this.config.verbose) vlog('ERR', VC.red, `${e instanceof Error ? e.message : String(e)}`);
-        return `Error: ${e instanceof Error ? e.message : String(e)}`;
+        return { response: `Error: ${e instanceof Error ? e.message : String(e)}`, modelId: '' };
       });
+      const { response, modelId: usedModelId } = result;
       if (this.config.verbose) {
         vlog('SEND', VC.green, `[${ch.id}] ${msg.groupId}`, `${response.length} chars`);
       }
       const retryCfg = getRetryConfig(ch.id);
       try {
-        await withRetry(
-          () => ch.send({ groupId: msg.groupId, content: response }),
-          retryCfg,
-        );
+        const isRemoteChannel = ch.id !== 'cli';
+        if (isRemoteChannel && usedModelId) {
+          await withRetry(
+            () => sendWithInterception(ch, { groupId: msg.groupId, content: response }, usedModelId, msg.groupId),
+            retryCfg,
+          );
+        } else {
+          await withRetry(
+            () => ch.send({ groupId: msg.groupId, content: response }),
+            retryCfg,
+          );
+        }
       } catch (e) {
         this.logger.error({ err: e, channel: ch.id, groupId: msg.groupId }, 'Send failed — logged, not rethrown');
         if (this.config.verbose) vlog('ERR', VC.red, `Send failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -204,6 +214,26 @@ class Orchestrator extends EventEmitter {
       logger: this.logger,
     });
     this.heartbeatScheduler.start();
+
+    // Init one-shot scheduler
+    oneShotScheduler.init(async (schedMsg) => {
+      const prefix = schedMsg.groupId.split('_')[0] ?? '';
+      const targetChannel = Array.from(this.channels.values()).find(c =>
+        (prefix === 'tg' && c.id === 'telegram') ||
+        (prefix === 'dc' && c.id === 'discord') ||
+        (c.id === 'whatsapp'),
+      ) ?? Array.from(this.channels.values())[0];
+      if (targetChannel) {
+        const result = await this.handleMessage({
+          id: schedMsg.id,
+          groupId: schedMsg.groupId,
+          senderId: schedMsg.senderId,
+          content: schedMsg.content,
+          timestamp: schedMsg.timestamp,
+        }, targetChannel).catch(e => ({ response: `Error: ${e instanceof Error ? e.message : String(e)}`, modelId: '' }));
+        await targetChannel.send({ groupId: schedMsg.groupId, content: result.response });
+      }
+    });
 
     // Load hooks and fire gateway:startup
     await hookRegistry.load();
@@ -300,7 +330,7 @@ class Orchestrator extends EventEmitter {
     this.messageQueue.enqueue(msg, channel, this.queueConfig);
   }
 
-  private async handleMessage(msg: InboundMessage, channel: IChannel): Promise<string> {
+  private async handleMessage(msg: InboundMessage, channel: IChannel): Promise<{ response: string; modelId: string }> {
     this.db.insertMessage({
       id: msg.id,
       group_id: msg.groupId,
@@ -322,11 +352,19 @@ class Orchestrator extends EventEmitter {
       content: m.content,
     }));
 
-    const sel = selectModel(this.catalog, msg.content);
-    if (!sel) return 'No model available. Run `microclaw provider add`.';
+    const historyForTier: HistoryMessage[] = messages.map(m => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+    }));
+
+    const lastAssistant = [...history].reverse().find(m => m.sender_id === 'assistant');
+    const recentToolUse = Boolean(lastAssistant && /\b(exec|write|read|web_search|web_fetch|browser|memory_write)\b/.test(lastAssistant.content));
+
+    const sel = selectModel(this.catalog, msg.content, { history: historyForTier, recentToolUse });
+    if (!sel) return { response: 'No model available. Run `microclaw provider add`.', modelId: '' };
 
     const provider = this.registry.get(sel.model.provider_id);
-    if (!provider) return `Provider ${sel.model.provider_id} not connected.`;
+    if (!provider) return { response: `Provider ${sel.model.provider_id} not connected.`, modelId: '' };
 
     if (this.config.verbose) {
       vlog('MODEL', VC.magenta, `${sel.model.id}`, `tier=${sel.tier}`);
@@ -355,6 +393,7 @@ class Orchestrator extends EventEmitter {
       lastUserMessage: msg.content,
       toolHint: toolHint || undefined,
       lastAssistantMessage: lastAssistantMsg,
+      modelId: sel.model.id,
     });
 
     const sessionKey = `${channel.id}-${msg.groupId}`;
@@ -396,7 +435,7 @@ class Orchestrator extends EventEmitter {
       catalog: this.catalog,
     }).catch(() => { /* swallow silently */ });
 
-    return response;
+    return { response, modelId: sel.model.id };
   }
 
   private async handleEvent(event: OrchestratorEvent): Promise<void> {

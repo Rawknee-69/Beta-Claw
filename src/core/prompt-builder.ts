@@ -4,7 +4,9 @@ import { estimateTokens } from './token-budget.js';
 import type { SkillDefinition } from './skill-parser.js';
 import type { MicroClawDB } from '../db.js';
 import { PATHS, GLOBAL_MEMORY_PATH } from './paths.js';
+import { TOOLS } from './tools.js';
 import { readPersonaSupplementBlock, readBehaviorHints } from '../memory/post-turn-extractor.js';
+import { getCapabilities } from '../capabilities/multimodal.js';
 
 export type PromptMode = 'full' | 'minimal';
 
@@ -13,12 +15,38 @@ const AGENT_BASE_PATH = path.resolve('prompts/system/agent-base.toon');
 const TOOL_SUMMARY =
   'read write exec list web_search web_fetch memory_read memory_write';
 
-function loadAgentBase(personaName: string, personaStyle: string): string {
+function loadAgentBase(
+  personaName: string,
+  personaStyle: string,
+  groupId: string,
+  soul: string,
+  memory: string,
+  skillsXml: string,
+  modelId?: string,
+): string {
   try {
     if (fs.existsSync(AGENT_BASE_PATH)) {
-      return fs.readFileSync(AGENT_BASE_PATH, 'utf-8')
+      const toolsList = TOOLS.map(t => `- ${t.name}: ${t.description}`).join('\n');
+      const caps = getCapabilities(modelId ?? '');
+
+      let prompt = fs.readFileSync(AGENT_BASE_PATH, 'utf-8')
         .replace(/\{\{PERSONA_NAME\}\}/g, personaName)
         .replace(/\{\{PERSONA_STYLE\}\}/g, personaStyle);
+
+      prompt = prompt
+        .replace('{TOOLS_LIST}',        toolsList)
+        .replace('{AVAILABLE_SKILLS}',  skillsXml)
+        .replace('{AGENT_NAME}',        personaName)
+        .replace(/{GROUP_ID}/g,         groupId)
+        .replace('{SOUL_CONTENT}',      soul || 'You are a helpful, capable AI assistant.')
+        .replace('{MEMORY_CONTENT}',    memory || 'No previous memory.')
+        .replace('{SKILLS_CONTENT}',    skillsXml)
+        .replace('{IMAGE_CAPABILITY}',  caps.canGenerateImage ? `Yes — provider: ${caps.imageProvider}` : 'Not available')
+        .replace('{AUDIO_CAPABILITY}',  caps.canGenerateAudio ? `Yes — provider: ${caps.audioProvider}` : 'Not available');
+
+      prompt = prompt.replace(/\{\{[A-Z_]+\}\}/g, '');
+
+      return prompt;
     }
   } catch { /* fall through */ }
   return `You are ${personaName} (${personaStyle}). Use tools — never say you cannot do something a tool can do.
@@ -77,6 +105,7 @@ export interface PromptBuilderOptions {
   toolHint?: string;
   lastAssistantMessage?: string;
   triggeredSkill?: string;
+  modelId?: string;
 }
 
 export async function buildSystemPrompt(opts: PromptBuilderOptions): Promise<string>;
@@ -118,7 +147,17 @@ export async function buildSystemPrompt(
 
   const soul = fs.existsSync(soulPath) ? fs.readFileSync(soulPath, 'utf-8').trim() : '';
   const { name: personaName, style: personaStyle } = extractSoulMeta(soul);
-  const agentBase = loadAgentBase(personaName, personaStyle);
+
+  const behaviorHints = readBehaviorHints(opts.groupId);
+  const memForBase = selectiveMemory(opts.db, opts.groupId, memoryPath, opts.lastUserMessage);
+  const memLines: string[] = [];
+  if (behaviorHints) memLines.push(`Behavior: ${behaviorHints}`);
+  if (memForBase) memLines.push(memForBase);
+  const memoryBlock = memLines.join('\n');
+
+  const skillsXml = formatSkillsForPrompt(opts.skills ?? []);
+
+  const agentBase = loadAgentBase(personaName, personaStyle, opts.groupId, soul, memoryBlock, skillsXml, opts.modelId);
 
   const parts: string[] = [];
 
@@ -155,12 +194,7 @@ export async function buildSystemPrompt(
   const userPrefs = readUserPreferences();
   if (userPrefs) parts.push(`--- User Preferences ---\n${userPrefs}`);
 
-  const behaviorHints = readBehaviorHints(opts.groupId);
-  const memory = selectiveMemory(opts.db, opts.groupId, memoryPath, opts.lastUserMessage);
-  const memLines: string[] = [];
-  if (behaviorHints) memLines.push(`Behavior: ${behaviorHints}`);
-  if (memory) memLines.push(memory);
-  if (memLines.length) parts.push(`--- Memory ---\n${memLines.join('\n')}`);
+  if (memoryBlock) parts.push(`--- Memory ---\n${memoryBlock}`);
 
   if (opts.toolHint) {
     parts.push(`--- Hint ---\n${opts.toolHint}`);

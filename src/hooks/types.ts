@@ -10,13 +10,15 @@ export interface HookEvent {
   timestamp:  Date;
   messages:   string[];
   context: {
-    sessionId?:      string;
-    groupId?:        string;
-    channelId?:      string;
-    senderId?:       string;
-    workspaceDir?:   string;
-    bootstrapFiles?: BootstrapFile[];
-    cfg?:            Record<string, unknown>;
+    sessionId?:       string;
+    groupId?:         string;
+    channelId?:       string;
+    senderId?:        string;
+    workspaceDir?:    string;
+    bootstrapFiles?:  BootstrapFile[];
+    cfg?:             Record<string, unknown>;
+    memoryPreloaded?: boolean;
+    memoryContent?:   string;
   };
 }
 
