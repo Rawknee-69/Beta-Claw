@@ -16,6 +16,7 @@ import { doctorCommand } from './commands/doctor.js';
 import { benchmarkCommand } from './commands/benchmark.js';
 import { exportCommand } from './commands/export.js';
 import { heartbeatCommand } from './commands/heartbeat.js';
+import { scheduleCommand } from './commands/schedule.js';
 
 const program = new Command();
 
@@ -40,5 +41,6 @@ program.addCommand(doctorCommand);
 program.addCommand(benchmarkCommand);
 program.addCommand(exportCommand);
 program.addCommand(heartbeatCommand);
+program.addCommand(scheduleCommand);
 
 program.parse();

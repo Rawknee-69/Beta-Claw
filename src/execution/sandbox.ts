@@ -46,9 +46,14 @@ export async function sandboxedExec(
   opts: SandboxRunOptions,
   timeoutMs = 30_000,
 ): Promise<string> {
-  return shouldSandbox(opts)
-    ? dockerExec(cmd, opts, timeoutMs)
-    : hostExec(cmd, cwd, timeoutMs);
+  if (!shouldSandbox(opts)) return hostExec(cmd, cwd, timeoutMs);
+  // Gracefully fall back to host execution when Docker is unavailable
+  // rather than returning a hard error string that confuses the agent.
+  if (!dockerAvailable()) {
+    console.warn('[sandbox] Docker unavailable — falling back to host execution');
+    return hostExec(cmd, cwd, timeoutMs);
+  }
+  return dockerExec(cmd, opts, timeoutMs);
 }
 
 function hostExec(cmd: string, cwd: string, timeoutMs: number): string {

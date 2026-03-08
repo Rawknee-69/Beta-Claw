@@ -9,6 +9,28 @@ import { GROUPS_DIR, WORK_DIR, MEMORY_FILENAME, SOUL_FILENAME } from '../../core
 
 const ExecutionModeSchema = z.enum(['isolated', 'full_control']);
 
+// ─── ANSI color helpers (no external dependency) ──────────────────────────────
+const clr = {
+  reset:   '\x1b[0m',
+  bold:    '\x1b[1m',
+  dim:     '\x1b[2m',
+  cyan:    '\x1b[36m',
+  bCyan:   '\x1b[96m',
+  green:   '\x1b[32m',
+  bGreen:  '\x1b[92m',
+  yellow:  '\x1b[33m',
+  bYellow: '\x1b[93m',
+  red:     '\x1b[31m',
+  magenta: '\x1b[35m',
+};
+const R = clr.reset;
+function c(...parts: string[]): string { return parts.join('') + R; }
+function ok(s: string): string  { return c(clr.bGreen, s); }
+function err(s: string): string { return c(clr.red, s); }
+function hi(s: string): string  { return c(clr.bYellow, clr.bold, s); }
+function dim(s: string): string { return c(clr.dim, s); }
+function cyan(s: string): string { return c(clr.bCyan, s); }
+
 interface SetupState {
   step: number;
   mode: string;
@@ -25,20 +47,23 @@ const MICRO_DIR = '.micro';
 const CONFIG_PATH = path.join(MICRO_DIR, 'config.toon');
 const STATE_PATH = path.join(MICRO_DIR, '.setup-state.json');
 
+const bx = clr.bCyan;   // box color
+const tx = clr.bold + clr.bYellow; // title color
+const vx = clr.dim;    // version color
 const LOGO = `
-    ╔══════════════════════════════════════════════╗
-    ║                                              ║
-    ║    ███╗   ███╗██╗ ██████╗██████╗  ██████╗    ║
-    ║    ████╗ ████║██║██╔════╝██╔══██╗██╔═══██╗   ║
-    ║    ██╔████╔██║██║██║     ██████╔╝██║   ██║   ║
-    ║    ██║╚██╔╝██║██║██║     ██╔══██╗██║   ██║   ║
-    ║    ██║ ╚═╝ ██║██║╚██████╗██║  ██║╚██████╔╝   ║
-    ║    ╚═╝     ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝   ║
-    ║               C  L  A  W                     ║
-    ║                                              ║
-    ║    Token-Optimized AI Agent Runtime v2.0     ║
-    ║                                              ║
-    ╚══════════════════════════════════════════════╝
+${bx}    ╔══════════════════════════════════════════════╗${R}
+${bx}    ║                                              ║${R}
+${bx}    ║  ${tx}  ███╗   ███╗██╗ ██████╗██████╗  ██████╗  ${R}${bx}  ║${R}
+${bx}    ║  ${tx}  ████╗ ████║██║██╔════╝██╔══██╗██╔═══██╗ ${R}${bx}  ║${R}
+${bx}    ║  ${tx}  ██╔████╔██║██║██║     ██████╔╝██║   ██║ ${R}${bx}  ║${R}
+${bx}    ║  ${tx}  ██║╚██╔╝██║██║██║     ██╔══██╗██║   ██║ ${R}${bx}  ║${R}
+${bx}    ║  ${tx}  ██║ ╚═╝ ██║██║╚██████╗██║  ██║╚██████╔╝ ${R}${bx}  ║${R}
+${bx}    ║  ${tx}  ╚═╝     ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝ ${R}${bx}  ║${R}
+${bx}    ║  ${tx}              C  L  A  W                   ${R}${bx}  ║${R}
+${bx}    ║                                              ║${R}
+${bx}    ║  ${vx}  Token-Optimized AI Agent Runtime v3.0   ${R}${bx}  ║${R}
+${bx}    ║                                              ║${R}
+${bx}    ╚══════════════════════════════════════════════╝${R}
 `;
 
 const PROVIDERS = [
@@ -72,7 +97,7 @@ function clearScreen(): void {
 }
 
 function printDivider(): void {
-  console.log('  ' + '\u2500'.repeat(46));
+  console.log(clr.dim + clr.cyan + '  ' + '\u2500'.repeat(46) + R);
 }
 
 function detectPlatform(): { os: string; arch: string; container: string } {
@@ -188,7 +213,7 @@ function writeConfig(state: SetupState): void {
     executionMode: state.mode,
     triggerWord: state.triggerWord,
     persona: {
-      name: state.name || 'Andy',
+      name: state.name || 'rem',
       style: state.persona,
       language: state.language || 'English',
     },
@@ -230,7 +255,7 @@ function writeSoulFile(groupId: string, state: SetupState): void {
 
   const content = [
     `# Identity`,
-    `You are ${state.name || 'Andy'}.`,
+    `You are ${state.name || 'rem'}.`,
     ``,
     `# Style`,
     styleDesc,
@@ -278,7 +303,7 @@ async function runSetupWizard(options: { reset?: boolean; mode?: string }): Prom
     searchProviders: [],
     channels: [],
     persona: '',
-    triggerWord: '@Andy',
+    triggerWord: '@rem',
     name: '',
     language: 'English',
   };
@@ -302,7 +327,6 @@ async function pairWhatsAppNow(): Promise<void> {
     const AUTH_DIR = '.micro/whatsapp-auth';
     fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-    const { state: authState, saveCreds } = await (useMultiFileAuthState as (dir: string) => Promise<{ state: unknown; saveCreds: () => void }>)(AUTH_DIR);
     const { version } = await (fetchLatestBaileysVersion as () => Promise<{ version: number[] }>)();
     // Use pino with level 'silent' — Baileys requires a real pino-compatible logger
     const pino = (await import('pino')).default;
@@ -310,6 +334,7 @@ async function pairWhatsAppNow(): Promise<void> {
 
     await new Promise<void>((resolve, reject) => {
       let done = false;
+      let qrCount = 0;
       let currentSock: Record<string, unknown> | null = null;
 
       const loggedOutCode = (DisconnectReason as unknown as Record<string, unknown>)['loggedOut'];
@@ -322,13 +347,32 @@ async function pairWhatsAppNow(): Promise<void> {
         }
       }, 180_000);
 
-      function connect(): void {
+      // Each connect() call creates a completely fresh auth state.
+      // On retry we wipe the auth dir first — stale partial creds from a failed
+      // handshake cause WhatsApp to show "try again later" on the next scan.
+      async function connect(): Promise<void> {
+        if (qrCount > 0) {
+          try {
+            fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+            fs.mkdirSync(AUTH_DIR, { recursive: true });
+          } catch { /* ignore */ }
+        }
+        qrCount++;
+
+        const { state: freshAuth, saveCreds: freshSave } =
+          await (useMultiFileAuthState as (dir: string) => Promise<{ state: unknown; saveCreds: () => void }>)(AUTH_DIR);
+
         // Do NOT use printQRInTerminal — it is deprecated. We render QR ourselves.
-        const sock = makeWASocket({ version, auth: authState, logger: silentLog }) as Record<string, unknown>;
+        const sock = makeWASocket({
+          version,
+          auth: freshAuth,
+          logger: silentLog,
+          browser: ['MicroClaw', 'Desktop', '3.0.0'],
+        }) as Record<string, unknown>;
         currentSock = sock;
         const ev = sock['ev'] as { on: (event: string, handler: (...a: unknown[]) => void) => void };
 
-        ev.on('creds.update', () => { (saveCreds as () => void)(); });
+        ev.on('creds.update', () => { (freshSave as () => void)(); });
 
         ev.on('connection.update', (update: unknown) => {
           if (done) return;
@@ -364,15 +408,15 @@ async function pairWhatsAppNow(): Promise<void> {
             }
 
             // Intermediate close (e.g. 515 stream error) is normal during the QR handshake.
-            // Reconnect and keep waiting — creds are preserved across reconnects.
+            // Wait 2s before reconnecting with a fresh auth state.
             if (!done) {
-              setTimeout(connect, 1000);
+              setTimeout(() => { void connect(); }, 2000);
             }
           }
         });
       }
 
-      connect();
+      void connect();
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -395,15 +439,15 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
     console.log(LOGO);
 
     const platform = detectPlatform();
-    console.log(`  Detected: ${platform.os} (${platform.arch})`);
-    console.log(`  Container: ${platform.container === 'none' ? 'not found' : platform.container}`);
-    console.log(`  Node.js: ${process.version}`);
-    console.log(`  Memory: ${(os.freemem() / 1024 / 1024 / 1024).toFixed(1)} GB free`);
+    console.log(`  ${dim('Detected:')} ${platform.os} (${platform.arch})`);
+    console.log(`  ${dim('Container:')} ${platform.container === 'none' ? dim('not found') : ok(platform.container)}`);
+    console.log(`  ${dim('Node.js:')} ${process.version}`);
+    console.log(`  ${dim('Memory:')} ${(os.freemem() / 1024 / 1024 / 1024).toFixed(1)} GB free`);
     console.log();
     printDivider();
     console.log();
-    console.log('  Welcome! This wizard will configure MicroClaw in ~3 minutes.');
-    console.log('  You can type "back" at any step to go back, or "quit" to exit.');
+    console.log(`  ${clr.bold}Welcome!${R} This wizard will configure MicroClaw in ~3 minutes.`);
+    console.log(`  You can type ${cyan('"back"')} at any step to go back, or ${cyan('"quit"')} to exit.`);
     console.log();
 
     const resume = loadState();
@@ -429,19 +473,19 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
   if (state.step <= 2) {
     console.log();
     printDivider();
-    console.log('  STEP 1 of 7 \u2014 Execution Mode');
+    console.log(`  ${hi('STEP 1 of 7')} ${clr.dim}\u2014 Execution Mode${R}`);
     printDivider();
     console.log();
     console.log('  How should MicroClaw run actions on your system?');
     console.log();
-    console.log('  [1] ISOLATED MODE (recommended)');
-    console.log('      Agents run in containers. Can only access');
-    console.log('      files you explicitly allow. Safe for servers.');
+    console.log(`  ${cyan('[1]')} ${clr.bold}ISOLATED MODE${R} ${dim('(recommended)')}`);
+    console.log(`      ${dim('Agents run in containers. Can only access')}`);
+    console.log(`      ${dim('files you explicitly allow. Safe for servers.')}`);
     console.log();
-    console.log('  [2] FULL CONTROL MODE');
-    console.log('      Agents run on your host. Full access to files,');
-    console.log('      terminal, and package installation.');
-    console.log('      Only use on a machine you own and control.');
+    console.log(`  ${cyan('[2]')} ${clr.bold}FULL CONTROL MODE${R}`);
+    console.log(`      ${dim('Agents run on your host. Full access to files,')}`);
+    console.log(`      ${dim('terminal, and package installation.')}`);
+    console.log(`      ${dim('Only use on a machine you own and control.')}`);
     console.log();
 
     let valid = false;
@@ -453,9 +497,9 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
         valid = true;
       } else if (ans === '2' || ans.toLowerCase().startsWith('full')) {
         state.mode = 'full_control';
-        console.log();
-        console.log('  \u26A0  Full Control gives MicroClaw host-level access.');
-        const confirm = await ask(rl, '  Are you sure? (yes/no): ');
+      console.log();
+      console.log(`  ${clr.yellow}\u26A0  Full Control gives MicroClaw host-level access.${R}`);
+      const confirm = await ask(rl, '  Are you sure? (yes/no): ');
         if (confirm.toLowerCase() === 'yes' || confirm.toLowerCase() === 'y') {
           valid = true;
         } else {
@@ -468,7 +512,7 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
       }
     }
 
-    console.log(`\n  \u2713 Mode: ${state.mode === 'isolated' ? 'Isolated' : 'Full Control'}`);
+    console.log(`\n  ${ok('\u2713 Mode:')} ${state.mode === 'isolated' ? 'Isolated' : 'Full Control'}`);
     state.step = 3;
     saveState(state);
   }
@@ -477,19 +521,19 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
   if (state.step <= 3) {
     console.log();
     printDivider();
-    console.log('  STEP 2 of 7 \u2014 AI Providers');
+    console.log(`  ${hi('STEP 2 of 7')} ${clr.dim}\u2014 AI Providers${R}`);
     printDivider();
     console.log();
     console.log('  Which AI providers do you want to configure?');
-    console.log('  Enter numbers separated by commas, or "done" when finished.');
+    console.log(`  Enter numbers separated by commas, or ${cyan('"done"')} when finished.`);
     console.log();
 
     for (const p of PROVIDERS) {
       const pad = p.num.length === 1 ? ' ' : '';
-      const already = state.providers.some(sp => sp.id === p.id) ? ' \u2713' : '';
-      console.log(`  [${pad}${p.num}] ${p.name.padEnd(15)} ${p.desc}${already}`);
+      const already = state.providers.some(sp => sp.id === p.id) ? ` ${ok('\u2713')}` : '';
+      console.log(`  ${cyan(`[${pad}${p.num}]`)} ${clr.bold}${p.name.padEnd(15)}${R} ${dim(p.desc)}${already}`);
     }
-    console.log(`  [13] Skip             Configure later`);
+    console.log(`  ${cyan('[13]')} ${clr.bold}Skip           ${R} ${dim('Configure later')}`);
     console.log();
 
     let done = false;
@@ -508,34 +552,34 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
         if (provider && !state.providers.some(sp => sp.id === provider.id)) {
           if (provider.id === 'ollama' || provider.id === 'lmstudio') {
             state.providers.push({ id: provider.id, name: provider.name, apiKey: '' });
-            console.log(`  \u2713 ${provider.name} added (no key needed)`);
+            console.log(`  ${ok('\u2713')} ${provider.name} added ${dim('(no key needed)')}`);
           } else {
             const existingKey = process.env[provider.envVar];
             if (existingKey) {
-              console.log(`  Found existing key for ${provider.name}: ${maskKey(existingKey)}`);
+              console.log(`  Found existing key for ${clr.bold}${provider.name}${R}: ${dim(maskKey(existingKey))}`);
               const use = await ask(rl, `  Use this key? (Y/n): `);
               if (use.toLowerCase() !== 'n' && use.toLowerCase() !== 'no') {
                 state.providers.push({ id: provider.id, name: provider.name, apiKey: existingKey });
-                console.log(`  \u2713 ${provider.name} added`);
+                console.log(`  ${ok('\u2713')} ${provider.name} added`);
                 continue;
               }
             }
 
-            console.log(`  Get your key at: ${provider.url}`);
+            console.log(`  Get your key at: ${dim(clr.cyan + provider.url + R)}`);
             let keyValid = false;
             while (!keyValid) {
               const key = await ask(rl, `  ${provider.name} API key: `);
               if (key === 'skip' || key === '') {
-                console.log(`  Skipped ${provider.name}`);
+                console.log(`  ${dim('Skipped')} ${provider.name}`);
                 keyValid = true;
               } else {
                 const validation = validateApiKey(provider.id, key);
                 if (validation.valid) {
                   state.providers.push({ id: provider.id, name: provider.name, apiKey: key });
-                  console.log(`  \u2713 ${provider.name} added: ${maskKey(key)}`);
+                  console.log(`  ${ok('\u2713')} ${provider.name} added: ${dim(maskKey(key))}`);
                   keyValid = true;
                 } else {
-                  console.log(`  \u2717 ${validation.error}`);
+                  console.log(`  ${err('\u2717')} ${validation.error}`);
                 }
               }
             }
@@ -557,9 +601,9 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
     }
 
     if (state.providers.length === 0) {
-      console.log('\n  No providers configured. You can add them later with "microclaw provider add".');
+      console.log(`\n  ${clr.yellow}No providers configured.${R} You can add them later with ${cyan('microclaw provider add')}.`);
     } else {
-      console.log(`\n  \u2713 Providers: ${state.providers.map(p => p.name).join(', ')}`);
+      console.log(`\n  ${ok('\u2713 Providers:')} ${state.providers.map(p => p.name).join(', ')}`);
     }
     state.step = 4;
     saveState(state);
@@ -569,15 +613,15 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
   if (state.step <= 4) {
     console.log();
     printDivider();
-    console.log('  STEP 3 of 7 \u2014 Web Search (optional)');
+    console.log(`  ${hi('STEP 3 of 7')} ${clr.dim}\u2014 Web Search (optional)${R}`);
     printDivider();
     console.log();
     console.log('  Enable web search so your assistant can look things up?');
     console.log();
-    console.log('  [1] Brave Search   \u2014 brave.com/search/api (recommended)');
-    console.log('  [2] Serper         \u2014 serper.dev (Google search results)');
-    console.log('  [3] Both           \u2014 Brave primary, Serper fallback');
-    console.log('  [4] Skip           \u2014 No web search');
+    console.log(`  ${cyan('[1]')} ${clr.bold}Brave Search${R}   ${dim('\u2014 brave.com/search/api (recommended)')}`);
+    console.log(`  ${cyan('[2]')} ${clr.bold}Serper${R}         ${dim('\u2014 serper.dev (Google search results)')}`);
+    console.log(`  ${cyan('[3]')} ${clr.bold}Both${R}           ${dim('\u2014 Brave primary, Serper fallback')}`);
+    console.log(`  ${cyan('[4]')} ${clr.bold}Skip${R}           ${dim('\u2014 No web search')}`);
     console.log();
 
     const ans = await ask(rl, '  Choose [1-4]: ');
@@ -592,25 +636,25 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
       const def = SEARCH_PROVIDERS.find(s => s.id === searchId)!;
       const existingKey = process.env[def.envVar];
       if (existingKey) {
-        console.log(`  Found existing ${def.name} key: ${maskKey(existingKey)}`);
+        console.log(`  Found existing ${clr.bold}${def.name}${R} key: ${dim(maskKey(existingKey))}`);
         state.searchProviders.push({ id: searchId, apiKey: existingKey });
-        console.log(`  \u2713 ${def.name} enabled`);
+        console.log(`  ${ok('\u2713')} ${def.name} enabled`);
       } else {
-        console.log(`  Get your key at: ${def.url}`);
+        console.log(`  Get your key at: ${dim(clr.cyan + def.url + R)}`);
         const key = await ask(rl, `  ${def.name} API key: `);
         if (key && key !== 'skip') {
           state.searchProviders.push({ id: searchId, apiKey: key });
-          console.log(`  \u2713 ${def.name} enabled: ${maskKey(key)}`);
+          console.log(`  ${ok('\u2713')} ${def.name} enabled: ${dim(maskKey(key))}`);
         } else {
-          console.log(`  Skipped ${def.name}`);
+          console.log(`  ${dim('Skipped')} ${def.name}`);
         }
       }
     }
 
     if (state.searchProviders.length === 0) {
-      console.log('\n  \u2713 Web search: disabled (add later via .env)');
+      console.log(`\n  ${ok('\u2713')} Web search: ${dim('disabled (add later via .env)')}`);
     } else {
-      console.log(`\n  \u2713 Search: ${state.searchProviders.map(s => SEARCH_PROVIDERS.find(d => d.id === s.id)?.name).join(', ')}`);
+      console.log(`\n  ${ok('\u2713 Search:')} ${state.searchProviders.map(s => SEARCH_PROVIDERS.find(d => d.id === s.id)?.name).join(', ')}`);
     }
     state.step = 5;
     saveState(state);
@@ -620,15 +664,15 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
   if (state.step <= 5) {
     console.log();
     printDivider();
-    console.log('  STEP 4 of 7 \u2014 Channels (optional)');
+    console.log(`  ${hi('STEP 4 of 7')} ${clr.dim}\u2014 Channels (optional)${R}`);
     printDivider();
     console.log();
     console.log('  CLI chat is always enabled. Want to add messaging channels?');
     console.log();
-    console.log('  [1] Telegram       \u2014 Needs TELEGRAM_BOT_TOKEN from @BotFather');
-    console.log('  [2] Discord        \u2014 Needs DISCORD_BOT_TOKEN from discord.com/developers');
-    console.log('  [3] WhatsApp       \u2014 QR code pairing via Baileys');
-    console.log('  [4] Skip           \u2014 CLI only for now');
+    console.log(`  ${cyan('[1]')} ${clr.bold}Telegram${R}       ${dim('\u2014 Needs TELEGRAM_BOT_TOKEN from @BotFather')}`);
+    console.log(`  ${cyan('[2]')} ${clr.bold}Discord${R}        ${dim('\u2014 Needs DISCORD_BOT_TOKEN from discord.com/developers')}`);
+    console.log(`  ${cyan('[3]')} ${clr.bold}WhatsApp${R}       ${dim('\u2014 QR code pairing via Baileys')}`);
+    console.log(`  ${cyan('[4]')} ${clr.bold}Skip${R}           ${dim('\u2014 CLI only for now')}`);
     console.log();
 
     const ans = await ask(rl, '  Choose channels (e.g. 1,2 or "skip"): ');
@@ -649,7 +693,7 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
           if (ch.envVar) {
             const existingToken = process.env[ch.envVar];
             if (existingToken) {
-              console.log(`  Found existing ${ch.name} token: ${maskKey(existingToken)}`);
+              console.log(`  Found existing ${clr.bold}${ch.name}${R} token: ${dim(maskKey(existingToken))}`);
               state.channels.push(ch.id);
             } else {
               const token = await ask(rl, `  ${ch.name} bot token: `);
@@ -661,28 +705,28 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
                 lines.push(`${ch.envVar}=${token}`);
                 fs.writeFileSync(envPath, lines.filter(Boolean).join('\n') + '\n', 'utf-8');
                 state.channels.push(ch.id);
-                console.log(`  \u2713 ${ch.name} enabled`);
+                console.log(`  ${ok('\u2713')} ${ch.name} enabled`);
               } else {
-                console.log(`  Skipped ${ch.name}`);
+                console.log(`  ${dim('Skipped')} ${ch.name}`);
               }
             }
           } else {
             // WhatsApp — offer to pair now via QR code
             state.channels.push(ch.id);
-            console.log(`\n  \u2713 WhatsApp enabled`);
+            console.log(`\n  ${ok('\u2713 WhatsApp enabled')}`);
             console.log();
-            console.log('  ┌─────────────────────────────────────────┐');
-            console.log('  │  Pair WhatsApp now?                      │');
-            console.log('  │  A QR code will appear — scan it in the  │');
-            console.log('  │  WhatsApp app → Linked Devices → Link a  │');
-            console.log('  │  device. Takes ~10 seconds.              │');
-            console.log('  └─────────────────────────────────────────┘');
+            console.log(`  ${clr.bGreen}┌─────────────────────────────────────────┐${R}`);
+            console.log(`  ${clr.bGreen}│${R}  ${clr.bold}Pair WhatsApp now?${R}                      ${clr.bGreen}│${R}`);
+            console.log(`  ${clr.bGreen}│${R}  A QR code will appear — scan it in the  ${clr.bGreen}│${R}`);
+            console.log(`  ${clr.bGreen}│${R}  WhatsApp app → Linked Devices → Link a  ${clr.bGreen}│${R}`);
+            console.log(`  ${clr.bGreen}│${R}  device. Takes ~10 seconds.              ${clr.bGreen}│${R}`);
+            console.log(`  ${clr.bGreen}└─────────────────────────────────────────┘${R}`);
             console.log();
             const pairNow = await ask(rl, '  Pair WhatsApp now? (Y/n): ');
             if (pairNow.toLowerCase() !== 'n' && pairNow.toLowerCase() !== 'no') {
               await pairWhatsAppNow();
             } else {
-              console.log('  WhatsApp will show QR on first "microclaw start".');
+              console.log(`  WhatsApp will show QR on first ${cyan('microclaw start')}.`);
             }
           }
         }
@@ -690,9 +734,9 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
     }
 
     if (state.channels.length === 0) {
-      console.log('\n  \u2713 Channels: CLI only');
+      console.log(`\n  ${ok('\u2713')} Channels: CLI only`);
     } else {
-      console.log(`\n  \u2713 Channels: CLI + ${state.channels.join(', ')}`);
+      console.log(`\n  ${ok('\u2713 Channels:')} CLI + ${state.channels.join(', ')}`);
     }
     state.step = 6;
     saveState(state);
@@ -702,15 +746,15 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
   if (state.step <= 6) {
     console.log();
     printDivider();
-    console.log('  STEP 5 of 7 \u2014 Persona & Style');
+    console.log(`  ${hi('STEP 5 of 7')} ${clr.dim}\u2014 Persona & Style${R}`);
     printDivider();
     console.log();
     console.log('  What communication style do you prefer?');
     console.log();
-    console.log('  [1] Concise      \u2014 Short, direct answers. No fluff.');
-    console.log('  [2] Detailed     \u2014 Thorough explanations with context.');
-    console.log('  [3] Technical    \u2014 Assumes expertise, uses jargon freely.');
-    console.log('  [4] Casual       \u2014 Relaxed, conversational, friendly.');
+    console.log(`  ${cyan('[1]')} ${clr.bold}Concise${R}      ${dim('\u2014 Short, direct answers. No fluff.')}`);
+    console.log(`  ${cyan('[2]')} ${clr.bold}Detailed${R}     ${dim('\u2014 Thorough explanations with context.')}`);
+    console.log(`  ${cyan('[3]')} ${clr.bold}Technical${R}    ${dim('\u2014 Assumes expertise, uses jargon freely.')}`);
+    console.log(`  ${cyan('[4]')} ${clr.bold}Casual${R}       ${dim('\u2014 Relaxed, conversational, friendly.')}`);
     console.log();
 
     const personaMap: Record<string, string> = {
@@ -732,23 +776,23 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
       }
     }
 
-    console.log(`\n  \u2713 Style: ${state.persona}`);
+    console.log(`\n  ${ok('\u2713 Style:')} ${state.persona}`);
     console.log();
 
-    const nameAns = await ask(rl, '  Give your assistant a name (default: Andy): ');
-    state.name = nameAns || 'Andy';
-    console.log(`  \u2713 Name: ${state.name}`);
+    const nameAns = await ask(rl, '  Give your assistant a name (default: rem): ');
+    state.name = nameAns || 'rem';
+    console.log(`  ${ok('\u2713 Name:')} ${state.name}`);
 
     const langAns = await ask(rl, '  Primary language (default: English): ');
     state.language = langAns || 'English';
-    console.log(`  \u2713 Language: ${state.language}`);
+    console.log(`  ${ok('\u2713 Language:')} ${state.language}`);
 
     const triggerAns = await ask(rl, `  Trigger word for group chats (default: @${state.name}): `);
     state.triggerWord = triggerAns || `@${state.name}`;
     if (!state.triggerWord.startsWith('@')) {
       state.triggerWord = `@${state.triggerWord}`;
     }
-    console.log(`  \u2713 Trigger: ${state.triggerWord}`);
+    console.log(`  ${ok('\u2713 Trigger:')} ${state.triggerWord}`);
 
     state.step = 7;
     saveState(state);
@@ -758,19 +802,19 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
   if (state.step <= 7) {
     console.log();
     printDivider();
-    console.log('  STEP 6 of 7 \u2014 Confirm Setup');
+    console.log(`  ${hi('STEP 6 of 7')} ${clr.dim}\u2014 Confirm Setup${R}`);
     printDivider();
     console.log();
-    console.log('  Here\'s your configuration:');
+    console.log(`  ${clr.bold}Here's your configuration:${R}`);
     console.log();
-    console.log(`    Mode:       ${state.mode === 'isolated' ? 'Isolated (sandboxed)' : 'Full Control (host access)'}`);
-    console.log(`    Providers:  ${state.providers.length > 0 ? state.providers.map(p => p.name).join(', ') : 'Not configured'}`);
-    console.log(`    Search:     ${state.searchProviders.length > 0 ? state.searchProviders.map(s => SEARCH_PROVIDERS.find(d => d.id === s.id)?.name ?? s.id).join(', ') : 'Disabled'}`);
-    console.log(`    Channels:   CLI${state.channels.length > 0 ? ' + ' + state.channels.join(', ') : ''}`);
-    console.log(`    Style:      ${state.persona}`);
-    console.log(`    Name:       ${state.name}`);
-    console.log(`    Language:   ${state.language}`);
-    console.log(`    Trigger:    ${state.triggerWord}`);
+    console.log(`    ${dim('Mode:')}       ${state.mode === 'isolated' ? 'Isolated (sandboxed)' : 'Full Control (host access)'}`);
+    console.log(`    ${dim('Providers:')}  ${state.providers.length > 0 ? state.providers.map(p => p.name).join(', ') : clr.yellow + 'Not configured' + R}`);
+    console.log(`    ${dim('Search:')}     ${state.searchProviders.length > 0 ? state.searchProviders.map(s => SEARCH_PROVIDERS.find(d => d.id === s.id)?.name ?? s.id).join(', ') : dim('Disabled')}`);
+    console.log(`    ${dim('Channels:')}   CLI${state.channels.length > 0 ? ' + ' + state.channels.join(', ') : ''}`);
+    console.log(`    ${dim('Style:')}      ${state.persona}`);
+    console.log(`    ${dim('Name:')}       ${clr.bold}${state.name}${R}`);
+    console.log(`    ${dim('Language:')}   ${state.language}`);
+    console.log(`    ${dim('Trigger:')}    ${cyan(state.triggerWord)}`);
     console.log();
 
     const confirm = await ask(rl, '  Apply this configuration? (Y/n): ');
@@ -857,36 +901,36 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
     console.log();
     printDivider();
     console.log();
-    console.log('  \u2713 Configuration saved to .micro/config.toon');
-    console.log('  \u2713 API keys saved to .env');
-    console.log(`  \u2713 Persona saved to ${path.join(GROUPS_DIR, 'default', SOUL_FILENAME)}`);
-    console.log('  \u2713 Runtime directories created');
+    console.log(`  ${ok('\u2713')} Configuration saved to ${dim('.micro/config.toon')}`);
+    console.log(`  ${ok('\u2713')} API keys saved to ${dim('.env')}`);
+    console.log(`  ${ok('\u2713')} Persona saved to ${dim(path.join(GROUPS_DIR, 'default', SOUL_FILENAME))}`);
+    console.log(`  ${ok('\u2713')} Runtime directories created`);
     console.log();
     printDivider();
     console.log();
-    console.log('  STEP 7 of 7 \u2014 Setup complete!');
+    console.log(`  ${hi('STEP 7 of 7')} ${clr.bGreen}\u2014 Setup complete!${R}`);
     console.log();
-    console.log('  Here\'s what you can do next:');
+    console.log(`  ${clr.bold}Here's what you can do next:${R}`);
     console.log();
-    console.log('    microclaw chat           Start chatting');
-    console.log('    microclaw start          Start daemon with all channels');
-    console.log('    microclaw doctor         Run health check');
-    console.log('    microclaw provider add   Add more AI providers');
-    console.log('    microclaw skills list    View available skills');
+    console.log(`    ${cyan('microclaw chat')}           Start chatting`);
+    console.log(`    ${cyan('microclaw start')}          Start daemon with all channels`);
+    console.log(`    ${cyan('microclaw doctor')}         Run health check`);
+    console.log(`    ${cyan('microclaw provider add')}   Add more AI providers`);
+    console.log(`    ${cyan('microclaw skills list')}    View available skills`);
     console.log();
 
     if (state.providers.length === 0) {
-      console.log('  Note: You still need to configure a provider before chatting.');
-      console.log('  Run: microclaw provider add');
+      console.log(`  ${clr.yellow}Note:${R} You still need to configure a provider before chatting.`);
+      console.log(`  Run: ${cyan('microclaw provider add')}`);
       console.log();
     }
 
     if (state.channels.length > 0) {
-      console.log('  Tip: Run "microclaw start" to connect your messaging channels.');
+      console.log(`  Tip: Run ${cyan('microclaw start')} to connect your messaging channels.`);
       console.log();
     }
 
-    console.log('  Documentation: https://github.com/microclaw');
+    console.log(`  Documentation: ${dim(clr.cyan + 'https://github.com/microclaw' + R)}`);
     console.log();
   }
 }

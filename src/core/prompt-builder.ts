@@ -30,7 +30,7 @@ function extractSoulMeta(soul: string): { name: string; style: string } {
   const nameMatch = soul.match(/^#\s*Identity\s*\nYou are ([^.\n]+)/m);
   const styleMatch = soul.match(/^#\s*Style\s*\n([^\n]+)/m);
   return {
-    name: nameMatch?.[1]?.trim() ?? 'Andy',
+    name: nameMatch?.[1]?.trim() ?? 'rem',
     style: styleMatch?.[1]?.trim() ?? 'direct and concise',
   };
 }
@@ -169,6 +169,13 @@ export async function buildSystemPrompt(
   const ctxLines = [`CWD: ${process.cwd()}`];
   if (opts.context?.channel)  ctxLines.push(`Channel: ${opts.context.channel}`);
   if (opts.context?.senderId) ctxLines.push(`Sender: ${opts.context.senderId}`);
+
+  // Reinforce messaging-channel rule so the model never leaks tool internals
+  const isMessagingChannel = opts.context?.channel && opts.context.channel !== 'cli';
+  if (isMessagingChannel) {
+    ctxLines.push('REMINDER: This is a messaging channel. Never include [Used tools:...] or [toolName] prefixes in your response. Reply naturally.');
+  }
+
   parts.push(`--- Context ---\n${ctxLines.join('\n')}`);
 
   return parts.join('\n\n');

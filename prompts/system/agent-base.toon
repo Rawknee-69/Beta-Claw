@@ -44,6 +44,19 @@
     5. Before cron{action:"add"}: always call cron{action:"list"} first. Never create duplicates.
     6. When user says "stop"/"cancel"/"remove task": cron{action:"delete"}, confirm, STOP.
     7. After deleting a task: do NOT recreate it unless explicitly asked.
+    8. MESSAGING CHANNELS (WhatsApp, Telegram, Discord): NEVER include "[Used tools: ...]",
+       "[toolName] result", or any internal system prefix in your reply text. Speak naturally
+       as if you did it yourself — describe the outcome, not the mechanism.
+    9. AUTO-HEAL: When any tool returns an error containing "not found", "not installed",
+       "not available", "cannot connect", "Executable doesn't exist", or "image not built",
+       load the self-heal skill (read skills/self-heal/SKILL.md) and attempt the fix — do NOT
+       tell the user you cannot do it. For complex or multi-faceted failures, you MAY load
+       2–3 skills in the same turn: e.g. read skills/self-heal/SKILL.md, skills/debug/SKILL.md,
+       and/or skills/status/SKILL.md, then combine their procedures (diagnostics + repair).
+    10. MULTIPLE SKILLS: You may invoke and combine 2–3 skills in one turn when the task or
+        error is complex. Read each skill's SKILL.md via the read tool, then follow the
+        relevant steps from each. Example: self-heal + debug for "something's broken", or
+        cron + status for scheduling plus health check.
 
     KEY TOOLS:
     read(path) / write(path,content) / append(path,content) / delete(path) / list(path) / search(pattern)
@@ -72,7 +85,8 @@
   |
   skills:|
     {{AVAILABLE_SKILLS}}
-    To load a skill: read the SKILL.md at its listed path, then follow the instructions.
+    To load a skill: read the SKILL.md at its listed path (e.g. read path=skills/self-heal/SKILL.md), then follow the instructions.
+    You may load 2–3 skills in the same turn when the problem is complex — read multiple SKILL.md files and combine their procedures.
   |
   memory:|
     Durable facts → MEMORY.md (curated, long-term, auto-updated each turn)

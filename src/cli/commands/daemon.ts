@@ -58,7 +58,13 @@ function getStatus(): { running: boolean; pid: number | null; uptime: string } {
   return { running: false, pid: null, uptime: 'stopped' };
 }
 
-async function startDaemon(options: { foreground?: boolean }): Promise<void> {
+const V = {
+  reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
+  cyan: '\x1b[96m', green: '\x1b[92m', yellow: '\x1b[93m',
+  magenta: '\x1b[35m', red: '\x1b[91m', gray: '\x1b[90m',
+};
+
+async function startDaemon(options: { foreground?: boolean; verbose?: boolean }): Promise<void> {
   const status = getStatus();
   if (status.running) {
     console.log(`MicroClaw is already running (PID ${status.pid}).`);
@@ -67,9 +73,13 @@ async function startDaemon(options: { foreground?: boolean }): Promise<void> {
 
   ensureDirs();
 
-  if (options.foreground) {
+  if (options.foreground || options.verbose) {
     dotenv.config();
-    console.log('MicroClaw v3.0 — Starting in foreground mode...');
+    const modeLabel = options.verbose ? 'verbose mode' : 'foreground mode';
+    console.log(`${V.cyan}${V.bold}MicroClaw v3.0${V.reset} — Starting in ${modeLabel}...`);
+    if (options.verbose) {
+      console.log(`${V.dim}  Streaming: ${V.cyan}[MSG]${V.reset} ${V.yellow}[TOOL]${V.reset} ${V.magenta}[MODEL]${V.reset} ${V.green}[SEND]${V.reset} ${V.red}[ERR]${V.reset}${V.dim} events${V.reset}`);
+    }
     writePid(process.pid);
 
     const { MicroClawDB } = await import('../../db.js');
@@ -83,7 +93,10 @@ async function startDaemon(options: { foreground?: boolean }): Promise<void> {
     const { DB_PATH } = await import('../../core/paths.js');
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     const db = new MicroClawDB(DB_PATH);
-    const orchestrator = new Orchestrator();
+    const orchestrator = new Orchestrator({
+      logLevel: options.verbose ? 'debug' : 'info',
+      verbose: options.verbose ?? false,
+    });
 
     // Register all available AI providers from environment
     const sharedRegistry = new ProviderRegistry();
@@ -200,7 +213,7 @@ function stopDaemon(): void {
   }
 }
 
-function restartDaemon(options: { foreground?: boolean }): void {
+function restartDaemon(options: { foreground?: boolean; verbose?: boolean }): void {
   const status = getStatus();
   if (status.running && status.pid) {
     console.log(`Stopping MicroClaw (PID ${status.pid})...`);
@@ -262,7 +275,8 @@ function showStatus(): void {
 const startCommand = new Command('start')
   .description('Start MicroClaw daemon')
   .option('--foreground', 'Run in foreground (logs to stdout)')
-  .action(async (options: { foreground?: boolean }) => {
+  .option('--verbose', 'Run in foreground with colored streaming of all events (MSG/TOOL/MODEL/SEND/ERR)')
+  .action(async (options: { foreground?: boolean; verbose?: boolean }) => {
     await startDaemon(options);
   });
 
@@ -275,7 +289,8 @@ const stopCommand = new Command('stop')
 const restartCommand = new Command('restart')
   .description('Restart MicroClaw daemon')
   .option('--foreground', 'Run in foreground after restart')
-  .action((options: { foreground?: boolean }) => {
+  .option('--verbose', 'Run in verbose mode after restart')
+  .action((options: { foreground?: boolean; verbose?: boolean }) => {
     restartDaemon(options);
   });
 

@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { MicroClawDB } from '../db.js';
 import type { ResourceProfile } from '../db.js';
 import type { IChannel, InboundMessage } from '../channels/interface.js';
@@ -19,11 +21,27 @@ import { withRetry, getRetryConfig } from '../execution/retry-policy.js';
 import { suggestWebSearch } from './complexity-estimator.js';
 import { extractAndPersist } from '../memory/post-turn-extractor.js';
 import { hookRegistry } from '../hooks/hook-registry.js';
-import { stopAllContainers, DEFAULT_SANDBOX_CONFIG, type SandboxRunOptions } from '../execution/sandbox.js';
+import { stopAllContainers, DEFAULT_SANDBOX_CONFIG, type SandboxRunOptions, type SandboxConfig } from '../execution/sandbox.js';
 import { z } from 'zod';
 import { initGmailManager, gmailManager } from '../gmail/gmail-manager.js';
 import { browserManager } from '../browser/browser-manager.js';
 import { scheduleClawHubSync, stopClawHubSync } from '../skills/clawhub-sync.js';
+
+/** Read executionMode from .micro/config.toon without a full parse — just regex. */
+function readExecutionMode(): 'isolated' | 'full_control' {
+  try {
+    const configPath = path.join('.micro', 'config.toon');
+    if (!fs.existsSync(configPath)) return 'isolated';
+    const content = fs.readFileSync(configPath, 'utf-8');
+    const match = content.match(/executionMode\s*:\s*([\w_]+)/);
+    if (match?.[1] === 'full_control') return 'full_control';
+  } catch { /* ignore */ }
+  return 'isolated';
+}
+
+const SANDBOX_CONFIG_FULL: SandboxConfig = { ...DEFAULT_SANDBOX_CONFIG, mode: 'off' };
+const runtimeSandboxConfig: SandboxConfig =
+  readExecutionMode() === 'full_control' ? SANDBOX_CONFIG_FULL : DEFAULT_SANDBOX_CONFIG;
 
 const InboundMessageSchema = z.object({
   id: z.string(),
@@ -46,6 +64,7 @@ interface OrchestratorConfig {
   profile: ResourceProfile;
   maxConcurrentGroups: number;
   logLevel: pino.Level;
+  verbose?: boolean;
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -53,7 +72,28 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   profile: 'standard',
   maxConcurrentGroups: 3,
   logLevel: 'info',
+  verbose: false,
 };
+
+// ANSI helpers for verbose console output
+const VC = {
+  reset:   '\x1b[0m',
+  bold:    '\x1b[1m',
+  dim:     '\x1b[2m',
+  cyan:    '\x1b[96m',
+  yellow:  '\x1b[93m',
+  green:   '\x1b[92m',
+  magenta: '\x1b[35m',
+  red:     '\x1b[91m',
+  gray:    '\x1b[90m',
+};
+function vlog(tag: string, color: string, msg: string, detail?: string): void {
+  const ts = new Date().toTimeString().slice(0, 8);
+  const tagStr = `${color}${VC.bold}[${tag}]${VC.reset}`;
+  const tsStr  = `${VC.gray}${ts}${VC.reset}`;
+  const detStr = detail ? ` ${VC.dim}${detail}${VC.reset}` : '';
+  console.log(`${tsStr} ${tagStr} ${msg}${detStr}`);
+}
 
 class Orchestrator extends EventEmitter {
   private readonly db: MicroClawDB;
@@ -78,11 +118,19 @@ class Orchestrator extends EventEmitter {
 
     this.messageQueue.setHandler(async (entry) => {
       const { msg, channel: ch } = entry;
-      await ch.sendTyping?.(msg.senderId).catch(() => {});
+      if (this.config.verbose) {
+        vlog('MSG', VC.cyan, `[${ch.id}] ${msg.groupId}`, `"${msg.content.slice(0, 80)}${msg.content.length > 80 ? '…' : ''}"`);
+      }
+      // Use groupId (the chat JID) not senderId (participant JID) — Baileys needs the chat JID for typing presence
+      await ch.sendTyping?.(msg.groupId).catch(() => {});
       const response = await this.handleMessage(msg, ch).catch((e: unknown) => {
         this.logger.error({ err: e, groupId: msg.groupId }, 'Error processing message');
+        if (this.config.verbose) vlog('ERR', VC.red, `${e instanceof Error ? e.message : String(e)}`);
         return `Error: ${e instanceof Error ? e.message : String(e)}`;
       });
+      if (this.config.verbose) {
+        vlog('SEND', VC.green, `[${ch.id}] ${msg.groupId}`, `${response.length} chars`);
+      }
       const retryCfg = getRetryConfig(ch.id);
       try {
         await withRetry(
@@ -91,6 +139,7 @@ class Orchestrator extends EventEmitter {
         );
       } catch (e) {
         this.logger.error({ err: e, channel: ch.id, groupId: msg.groupId }, 'Send failed — logged, not rethrown');
+        if (this.config.verbose) vlog('ERR', VC.red, `Send failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     });
 
@@ -243,7 +292,7 @@ class Orchestrator extends EventEmitter {
       isMain,
       elevated: 'off',
       groupId,
-      cfg:      DEFAULT_SANDBOX_CONFIG,
+      cfg:      runtimeSandboxConfig,
     };
   }
 
@@ -278,6 +327,10 @@ class Orchestrator extends EventEmitter {
 
     const provider = this.registry.get(sel.model.provider_id);
     if (!provider) return `Provider ${sel.model.provider_id} not connected.`;
+
+    if (this.config.verbose) {
+      vlog('MODEL', VC.magenta, `${sel.model.id}`, `tier=${sel.tier}`);
+    }
 
     const recentHistory = this.db.getMessages(msg.groupId, 5);
     const lastAssistantMsg = [...recentHistory].reverse().find(m => m.sender_id === 'assistant')?.content;
@@ -317,7 +370,10 @@ class Orchestrator extends EventEmitter {
       senderId: msg.senderId,
       sessionKey,
       sandboxOpts,
-      onToolCall: (name) => this.logger.info({ tool: name }, 'Tool called'),
+      onToolCall: (name) => {
+        this.logger.info({ tool: name }, 'Tool called');
+        if (this.config.verbose) vlog('TOOL', VC.yellow, name);
+      },
     });
 
     const responseId = randomUUID();
