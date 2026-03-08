@@ -16,6 +16,8 @@ import pino from 'pino';
 import { DB_PATH } from './paths.js';
 import { MessageQueue, type QueueConfig } from '../execution/message-queue.js';
 import { withRetry, getRetryConfig } from '../execution/retry-policy.js';
+import { suggestWebSearch } from './complexity-estimator.js';
+import { extractAndPersist } from '../memory/post-turn-extractor.js';
 
 interface OrchestratorEvent {
   type: 'message' | 'scheduled_task' | 'webhook' | 'ipc' | 'skill_reload' | 'shutdown';
@@ -218,14 +220,22 @@ class Orchestrator extends EventEmitter {
     const provider = this.registry.get(sel.model.provider_id);
     if (!provider) return `Provider ${sel.model.provider_id} not connected.`;
 
+    // Get last assistant reply for topic-shift detection
+    const recentHistory = this.db.getMessages(msg.groupId, 5);
+    const lastAssistantMsg = [...recentHistory].reverse().find(m => m.sender_id === 'assistant')?.content;
+
+    const toolHint = suggestWebSearch(msg.content, lastAssistantMsg);
+
     const skills = this.skillWatcher.listSkills();
-    const systemPrompt = await buildSystemPrompt(
-      msg.groupId,
+    const systemPrompt = await buildSystemPrompt({
+      groupId: msg.groupId,
       skills,
-      { senderId: msg.senderId, channel: channel.id },
-      this.db,
-      msg.content,
-    );
+      context: { senderId: msg.senderId, channel: channel.id },
+      db: this.db,
+      lastUserMessage: msg.content,
+      toolHint: toolHint || undefined,
+      lastAssistantMessage: lastAssistantMsg,
+    });
 
     const response = await agentLoop(messages, {
       provider,
@@ -248,6 +258,16 @@ class Orchestrator extends EventEmitter {
       channel: channel.id,
       processed: 1,
     });
+
+    // Fire-and-forget post-turn extraction (Phase 1/2/3/6)
+    void extractAndPersist({
+      userMsg: msg.content,
+      assistantReply: response,
+      groupId: msg.groupId,
+      db: this.db,
+      registry: this.registry,
+      catalog: this.catalog,
+    }).catch(() => { /* swallow silently */ });
 
     return response;
   }

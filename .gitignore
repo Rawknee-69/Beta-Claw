@@ -22,8 +22,12 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 CLAUDE.md
 MICROCLAW_FULL_DOC.md
 .cursor/
-
+.workspace/
 :memory:
+microclaw.db
+microclaw.db-wal
+microclaw.db-shm
+microclaw.md
 
 # dotenv environment variable files
 .env

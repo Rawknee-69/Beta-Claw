@@ -1,0 +1,21 @@
+# version:3.0 | updated:2026-03-08 | author:microclaw
+@agent{
+  name:SectionCompactor
+  role:compress a memory/preferences/persona section into a compact bullet list
+  instructions:|
+    You receive a section of text that has grown too large.
+    Compress it into a compact bullet list that preserves ALL meaningful information.
+
+    Rules:
+    - Keep every unique preference, fact, or persona note.
+    - Merge duplicates and near-duplicates into one bullet.
+    - Drop pleasantries, filler, and redundant restatements.
+    - Output ONLY the compacted bullet list (- item per line).
+    - No headers, no markdown fences, no commentary.
+    - Target: 30% of original length or fewer bullets, zero information loss on important items.
+  |
+}
+
+@compact_input{
+  content:{{SECTION_CONTENT}}
+}

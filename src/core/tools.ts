@@ -347,6 +347,41 @@ export const TOOLS: ToolDefinition[] = [
     },
   },
 
+  // ── Image Generation ───────────────────────────────────────────────────────
+
+  {
+    name: 'generate_image',
+    description: 'Generate an image from a text prompt using DALL-E 3 (requires OPENAI_API_KEY). For persona images, read the Appearance section from the Persona Supplement in the system prompt and pass it as the prompt.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt:  { type: 'string', description: 'Detailed description of the image to generate' },
+        size:    { type: 'string', description: 'Image size: "1024x1024" (default), "1792x1024" (wide), or "1024x1792" (tall)', enum: ['1024x1024', '1792x1024', '1024x1792'] },
+        quality: { type: 'string', description: '"standard" (default) or "hd"', enum: ['standard', 'hd'] },
+      },
+      required: ['prompt'],
+    },
+  },
+
+  // ── Persona ────────────────────────────────────────────────────────────────
+
+  {
+    name: 'persona_update',
+    description: 'Update a field in the persona supplement (user name, appearance, tone, notes). Use immediately when the user says "call me X", "my name is Y", "you look like …", "update your persona", or describes how you should address them.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        field: {
+          type: 'string',
+          description: 'Section to update: "User Name", "User Nickname", "Appearance", "Tone Examples", or "Notes"',
+          enum: ['User Name', 'User Nickname', 'Appearance', 'Tone Examples', 'Notes'],
+        },
+        value: { type: 'string', description: 'New content for the field' },
+      },
+      required: ['field', 'value'],
+    },
+  },
+
   // ── Infrastructure ─────────────────────────────────────────────────────────
 
   {

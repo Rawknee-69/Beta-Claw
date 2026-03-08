@@ -3,7 +3,8 @@ import path from 'node:path';
 import { estimateTokens } from './token-budget.js';
 import type { SkillDefinition } from './skill-parser.js';
 import type { MicroClawDB } from '../db.js';
-import { GROUPS_DIR, MEMORY_FILENAME, SOUL_FILENAME, HEARTBEAT_FILENAME } from './paths.js';
+import { GROUPS_DIR, MEMORY_FILENAME, SOUL_FILENAME, HEARTBEAT_FILENAME, GLOBAL_MEMORY_PATH } from './paths.js';
+import { readPersonaSupplementBlock, readBehaviorHints } from '../memory/post-turn-extractor.js';
 
 export type PromptMode = 'full' | 'minimal';
 
@@ -69,6 +70,10 @@ export interface PromptBuilderOptions {
   lastUserMessage?: string;
   promptMode?: PromptMode;
   lightContext?: boolean;
+  /** Hint injected before Memory section, e.g. from suggestWebSearch() */
+  toolHint?: string;
+  /** Last assistant reply — used for topic-shift web-search nudge */
+  lastAssistantMessage?: string;
 }
 
 /**
@@ -107,6 +112,18 @@ export async function buildSystemPrompt(
   const memoryPath = path.join(GROUPS_DIR, opts.groupId, MEMORY_FILENAME);
   const heartbeatPath = path.join(GROUPS_DIR, opts.groupId, HEARTBEAT_FILENAME);
 
+  // Extract user preferences from the global memory file (microclaw.md)
+  function readUserPreferences(): string {
+    try {
+      if (!fs.existsSync(GLOBAL_MEMORY_PATH)) return '';
+      const content = fs.readFileSync(GLOBAL_MEMORY_PATH, 'utf-8');
+      const rx = /## User Preferences\s*\n([\s\S]*?)(?=\n##|$)/m;
+      const m = content.match(rx);
+      const prefs = m ? (m[1] ?? '').trim() : '';
+      return prefs === '(Updated automatically as MicroClaw learns your preferences)' ? '' : prefs;
+    } catch { return ''; }
+  }
+
   const soul = fs.existsSync(soulPath) ? fs.readFileSync(soulPath, 'utf-8').trim() : '';
   const { name: personaName, style: personaStyle } = extractSoulMeta(soul);
   const agentBase = loadAgentBase(personaName, personaStyle);
@@ -129,15 +146,36 @@ export async function buildSystemPrompt(
   }
 
   // ─── full mode ─────────────────────────────────────────────────
-  if (soul) parts.push(`--- Persona ---\n${soul}`);
+
+  // Persona (soul + supplement for appearance / user name / tone)
+  if (soul) {
+    let personaBlock = soul;
+    const supplement = readPersonaSupplementBlock(opts.groupId);
+    if (supplement) personaBlock += `\n\n--- Persona Supplement ---\n${supplement}`;
+    parts.push(`--- Persona ---\n${personaBlock}`);
+  }
 
   if (opts.skills && opts.skills.length > 0) {
     const skillList = opts.skills.map(s => `/${s.command}: ${s.description}`).join('\n');
     parts.push(`--- Skills ---\n${skillList}`);
   }
 
+  // User preferences from microclaw.md
+  const userPrefs = readUserPreferences();
+  if (userPrefs) parts.push(`--- User Preferences ---\n${userPrefs}`);
+
+  // Behavior hints (inferred from past turns) + long-term memory
+  const behaviorHints = readBehaviorHints(opts.groupId);
   const memory = selectiveMemory(opts.db, opts.groupId, memoryPath, opts.lastUserMessage);
-  if (memory) parts.push(`--- Memory ---\n${memory}`);
+  const memLines: string[] = [];
+  if (behaviorHints) memLines.push(`Behavior: ${behaviorHints}`);
+  if (memory) memLines.push(memory);
+  if (memLines.length) parts.push(`--- Memory ---\n${memLines.join('\n')}`);
+
+  // Tool hint (from suggestWebSearch or caller)
+  if (opts.toolHint) {
+    parts.push(`--- Hint ---\n${opts.toolHint}`);
+  }
 
   const ctxLines = [`CWD: ${process.cwd()}`];
   if (opts.context?.channel)  ctxLines.push(`Channel: ${opts.context.channel}`);

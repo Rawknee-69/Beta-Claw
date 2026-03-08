@@ -222,8 +222,12 @@ export function estimateComplexity(input: string, context?: { recentToolUse?: bo
 
   const toolsNeeded: string[] = [];
 
-  if (['search', 'look up', 'google', 'latest', 'current', 'news', 'price', 'weather', 'find out']
-    .some(k => lower.includes(k))) toolsNeeded.push('web_search');
+  if ([
+    'search', 'look up', 'google', 'latest', 'current', 'news', 'price', 'weather', 'find out',
+    'today', 'right now', 'recent', 'recently', 'statistics', 'what happened', 'is there a',
+    'war', 'conflict', 'election', 'stock', 'market', 'rate', 'score', 'result', 'release',
+    'update on', 'status of', 'how is', 'what is the', 'who won', 'when did',
+  ].some(k => lower.includes(k))) toolsNeeded.push('web_search');
 
   if (['create file', 'write file', 'save', 'generate', 'build a', 'create a', 'make a', 'write a']
     .some(k => lower.includes(k))) toolsNeeded.push('write_file');
@@ -246,4 +250,29 @@ export function estimateComplexity(input: string, context?: { recentToolUse?: bo
     toolsNeeded,
     breakdown,
   };
+}
+
+/**
+ * Lightweight check: should we nudge the model to consider web_search?
+ * Returns a hint string to inject into the system prompt, or empty string.
+ */
+export function suggestWebSearch(message: string, lastAssistantMessage?: string): string {
+  const result = estimateComplexity(message);
+  if (result.webSearchNeeded) {
+    return 'Consider using web_search for up-to-date information on this.';
+  }
+
+  // Topic-shift detection: if the new message introduces entities not in the prior reply
+  if (lastAssistantMessage) {
+    const prevWords = new Set(lastAssistantMessage.toLowerCase().split(/\W+/).filter(w => w.length > 4));
+    const newWords = message.toLowerCase().split(/\W+/).filter(w => w.length > 4);
+    const overlap = newWords.filter(w => prevWords.has(w)).length;
+    const overlapRatio = newWords.length > 0 ? overlap / newWords.length : 1;
+    // Low overlap AND message has a factual-question shape → topic shift
+    if (overlapRatio < 0.2 && /\b(what|who|when|where|how|why|is|are|was|were|did|does)\b/i.test(message)) {
+      return 'Consider using web_search — this looks like a new topic that may need current information.';
+    }
+  }
+
+  return '';
 }

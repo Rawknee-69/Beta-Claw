@@ -8,6 +8,7 @@ import {
   GROUPS_DIR, WORK_DIR, WORKSPACE, IMAGES_DIR, DOWNLOADS_DIR,
   MEMORY_FILENAME,
 } from './paths.js';
+import { updatePersonaField } from '../memory/post-turn-extractor.js';
 import { loadConfig } from './config-loader.js';
 
 // ── Security guards ───────────────────────────────────────────────────────────
@@ -106,10 +107,14 @@ export class ToolExecutor {
         case 'cron':          return this.cronTool(args['action'] as string, args);
         case 'scheduler':     return this.schedulerTool(args['action'] as string, args);
         case 'heartbeat':     return await this.heartbeat(args['url'] as string, args['timeout'] as number | undefined);
+        // Image Generation
+        case 'generate_image': return await this.generateImage(args['prompt'] as string, args['size'] as string | undefined, args['quality'] as string | undefined);
         // Agent Management
         case 'session':       return this.sessionTool(args['action'] as string);
         case 'context':       return this.contextTool(args['action'] as string, args['value'] as string | undefined);
         case 'history':       return this.historyTool(args['action'] as string, args['limit'] as number | undefined);
+        // Persona
+        case 'persona_update': return this.personaUpdate(args['field'] as string, args['value'] as string);
         // Config
         case 'config':        return this.configTool(args['action'] as string, args['key'] as string | undefined, args['value'] as string | undefined);
         case 'env':           return this.envTool(args['key'] as string | undefined);
@@ -593,6 +598,68 @@ export class ToolExecutor {
       return `History cleared for group ${this.groupId}.`;
     }
     return `Unknown history action: ${action}`;
+  }
+
+  // ── Image Generation ─────────────────────────────────────────────────────
+
+  private async generateImage(prompt: string, size = '1024x1024', quality = 'standard'): Promise<string> {
+    const apiKey = process.env['OPENAI_API_KEY'];
+    if (!apiKey) {
+      return 'Image generation requires OPENAI_API_KEY to be set. Set it via `export OPENAI_API_KEY=sk-...` or add it to your environment.';
+    }
+    if (!prompt?.trim()) return 'Provide a prompt to generate an image.';
+
+    try {
+      const resp = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'dall-e-3',
+          prompt: prompt.trim(),
+          n: 1,
+          size,
+          quality,
+          response_format: 'url',
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.text().catch(() => resp.statusText);
+        return `Image generation failed (${resp.status}): ${err}`;
+      }
+
+      const data = await resp.json() as { data?: Array<{ url?: string; revised_prompt?: string }> };
+      const img = data.data?.[0];
+      if (!img?.url) return 'Image generation returned no URL.';
+
+      // Save the URL to a file in images dir for persistence
+      const fname = `image-${Date.now()}.url.txt`;
+      const dest = path.join(IMAGES_DIR, fname);
+      fs.mkdirSync(IMAGES_DIR, { recursive: true });
+      fs.writeFileSync(dest, img.url);
+
+      const revised = img.revised_prompt ? `\nRevised prompt: ${img.revised_prompt}` : '';
+      return `Image generated: ${img.url}${revised}\nSaved URL to: ${dest}`;
+    } catch (e) {
+      return `Image generation error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  // ── Persona ───────────────────────────────────────────────────────────────
+
+  private personaUpdate(field: string, value: string): string {
+    const allowed = ['User Name', 'User Nickname', 'Appearance', 'Tone Examples', 'Notes'];
+    if (!allowed.includes(field)) return `Unknown persona field: ${field}. Use one of: ${allowed.join(', ')}.`;
+    if (!value?.trim()) return 'Value cannot be empty.';
+    try {
+      updatePersonaField(this.groupId, field, value.trim());
+      return `Persona updated — ${field}: ${value.trim()}`;
+    } catch (e) {
+      return `Failed to update persona: ${e instanceof Error ? e.message : String(e)}`;
+    }
   }
 
   // ── System Config ─────────────────────────────────────────────────────────
