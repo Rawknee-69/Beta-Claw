@@ -91,12 +91,19 @@ const VC = {
   gray:    '\x1b[90m',
   blue:    '\x1b[94m',
 };
-function vlog(tag: string, color: string, msg: string, detail?: string): void {
+function vlog(tag: string, color: string, msg: string, detail?: string, runTag?: string): void {
   const ts = new Date().toTimeString().slice(0, 8);
   const tagStr = `${color}${VC.bold}[${tag}]${VC.reset}`;
   const tsStr  = `${VC.gray}${ts}${VC.reset}`;
   const detStr = detail ? ` ${VC.dim}${detail}${VC.reset}` : '';
-  console.log(`${tsStr} ${tagStr} ${msg}${detStr}`);
+  const rtStr  = runTag  ? ` ${VC.dim}#${runTag}${VC.reset}` : '';
+  console.log(`${tsStr}${rtStr} ${tagStr} ${msg}${detStr}`);
+}
+
+/** Returns a vlog bound to a specific run tag so concurrent runs are distinguishable. */
+function makeRunLog(runTag: string) {
+  return (tag: string, color: string, msg: string, detail?: string) =>
+    vlog(tag, color, msg, detail, runTag);
 }
 
 function formatToolDetail(name: string, args: Record<string, unknown>): string {
@@ -125,7 +132,9 @@ class Orchestrator extends EventEmitter {
   // Allow up to 2 concurrent runs per group so new messages are processed immediately
   // even if the previous run is still executing a long-running command (npm install,
   // file writes, etc.).  Each run is fully isolated — neither kills the other.
-  private readonly queueConfig: Partial<QueueConfig> = { mode: 'collect', debounceMs: 1000, cap: 20, drop: 'summarize', maxConcurrent: 2 };
+  // 5 concurrent slots per group: chat + browser session + long build + cron delivery + spare.
+  // Each slot is fully isolated — none waits for, kills, or reads the state of another.
+  private readonly queueConfig: Partial<QueueConfig> = { mode: 'collect', debounceMs: 1000, cap: 20, drop: 'summarize', maxConcurrent: 5 };
   private catalog: ModelEntry[] = [];
   private scheduler: TaskScheduler | null = null;
   private heartbeatScheduler: HeartbeatScheduler | null = null;
@@ -139,23 +148,22 @@ class Orchestrator extends EventEmitter {
 
     this.messageQueue.setHandler(async (entry) => {
       const { msg, channel: ch } = entry;
+      // Short 4-char hex tag that identifies this concurrent run in verbose logs
+      const runTag = entry.id.slice(0, 4);
+      const rlog   = this.config.verbose ? makeRunLog(runTag) : null;
 
-      if (this.config.verbose) {
-        vlog('MSG', VC.cyan, `[${ch.id}] ${msg.groupId}`, `"${msg.content.slice(0, 80)}${msg.content.length > 80 ? '…' : ''}"`);
-      }
+      rlog?.('MSG', VC.cyan, `[${ch.id}] ${msg.groupId}`, `"${msg.content.slice(0, 80)}${msg.content.length > 80 ? '…' : ''}"`);
       await ch.sendTyping?.(msg.groupId).catch(() => {});
-      const result = await this.handleMessage(msg, ch).catch((e: unknown) => {
+      const result = await this.handleMessage(msg, ch, runTag).catch((e: unknown) => {
         this.logger.error({ err: e, groupId: msg.groupId }, 'Error processing message');
-        if (this.config.verbose) vlog('ERR', VC.red, `${e instanceof Error ? e.message : String(e)}`);
+        rlog?.('ERR', VC.red, `${e instanceof Error ? e.message : String(e)}`);
         return { response: `Error: ${e instanceof Error ? e.message : String(e)}`, modelId: '' };
       });
       const { response, modelId: usedModelId } = result;
 
       if (!response.trim()) return;
 
-      if (this.config.verbose) {
-        vlog('SEND', VC.green, `[${ch.id}] ${msg.groupId}`, `${response.length} chars`);
-      }
+      rlog?.('SEND', VC.green, `[${ch.id}] ${msg.groupId}`, `${response.length} chars`);
       const retryCfg = getRetryConfig(ch.id);
       try {
         const isRemoteChannel = ch.id !== 'cli';
@@ -172,7 +180,7 @@ class Orchestrator extends EventEmitter {
         }
       } catch (e) {
         this.logger.error({ err: e, channel: ch.id, groupId: msg.groupId }, 'Send failed — logged, not rethrown');
-        if (this.config.verbose) vlog('ERR', VC.red, `Send failed: ${e instanceof Error ? e.message : String(e)}`);
+        rlog?.('ERR', VC.red, `Send failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     });
 
@@ -250,9 +258,7 @@ class Orchestrator extends EventEmitter {
         (c.id === 'whatsapp'),
       ) ?? Array.from(this.channels.values())[0];
       if (targetChannel) {
-        if (this.config.verbose) {
-          vlog('SCHED', VC.magenta, schedMsg.groupId, `"${schedMsg.content.slice(0, 60)}"`);
-        }
+        vlog('SCHED', VC.magenta, schedMsg.groupId, `"${schedMsg.content.slice(0, 60)}"`, 'sched');
         await targetChannel.send({ groupId: schedMsg.groupId, content: schedMsg.content })
           .catch(e => this.logger.warn({ err: e, groupId: schedMsg.groupId }, 'One-shot delivery failed'));
       } else {
@@ -288,7 +294,7 @@ class Orchestrator extends EventEmitter {
         (c.id === 'whatsapp'),
       ) ?? Array.from(this.channels.values())[0];
       if (targetChannel) {
-        if (this.config.verbose) vlog('PROC', VC.blue, groupId, result.slice(0, 80));
+        vlog('PROC', VC.blue, groupId, result.slice(0, 80), 'proc');
         await targetChannel.send({ groupId, content: result })
           .catch(e => this.logger.warn({ err: e, groupId }, 'Background process result delivery failed'));
       }
@@ -372,7 +378,8 @@ class Orchestrator extends EventEmitter {
     this.messageQueue.enqueue(msg, channel, this.queueConfig);
   }
 
-  private async handleMessage(msg: InboundMessage, channel: IChannel): Promise<{ response: string; modelId: string }> {
+  private async handleMessage(msg: InboundMessage, channel: IChannel, runTag = 'sys'): Promise<{ response: string; modelId: string }> {
+    const rlog = this.config.verbose ? makeRunLog(runTag) : null;
     this.db.insertMessage({
       id: msg.id,
       group_id: msg.groupId,
@@ -392,7 +399,7 @@ class Orchestrator extends EventEmitter {
 
     if (this.config.verbose) {
       const ctxChars = history.reduce((n, m) => n + m.content.length, 0);
-      vlog('CTX', VC.blue, `${history.length} msgs`, `~${ctxChars} chars from ${msg.groupId.slice(0, 20)}`);
+      rlog?.('CTX', VC.blue, `${history.length} msgs`, `~${ctxChars} chars from ${msg.groupId.slice(0, 20)}`);
     }
 
     const messages = history.map(m => ({
@@ -414,9 +421,7 @@ class Orchestrator extends EventEmitter {
     const provider = this.registry.get(sel.model.provider_id);
     if (!provider) return { response: `Provider ${sel.model.provider_id} not connected.`, modelId: '' };
 
-    if (this.config.verbose) {
-      vlog('MODEL', VC.magenta, `${sel.model.id}`, `tier=${sel.tier}`);
-    }
+    rlog?.('MODEL', VC.magenta, `${sel.model.id}`, `tier=${sel.tier}`);
 
     const recentHistory = this.db.getMessages(msg.groupId, 5);
     const lastAssistantMsg = [...recentHistory].reverse().find(m => m.sender_id === 'assistant')?.content;
@@ -458,28 +463,24 @@ class Orchestrator extends EventEmitter {
       sessionKey,
       sandboxOpts,
       onLLMCall: (iter, msgs) => {
-        if (this.config.verbose) {
-          vlog('LLM', VC.cyan, `round ${iter + 1}`, `model=${sel.model.id}  msgs=${msgs}`);
-        }
+        rlog?.('LLM', VC.cyan, `round ${iter + 1}`, `model=${sel.model.id}  msgs=${msgs}`);
       },
       onToolStart: (name, args) => {
         this.logger.info({ tool: name }, 'Tool called');
         if (this.config.verbose) {
           const detail = formatToolDetail(name, args);
-          vlog('TOOL', VC.yellow, `→ ${name}`, detail);
+          rlog?.('TOOL', VC.yellow, `→ ${name}`, detail);
         }
       },
       onToolCall: (name, _args, result) => {
         if (this.config.verbose) {
           const resultPreview = result.length > 400 ? result.slice(0, 400) + '…' : result;
-          vlog('RSLT', VC.gray, `← ${name}`, resultPreview.replace(/\n/g, ' ↵ '));
+          rlog?.('RSLT', VC.gray, `← ${name}`, resultPreview.replace(/\n/g, ' ↵ '));
         }
       },
     });
 
-    if (this.config.verbose) {
-      vlog('DONE', VC.green, `${response.length} chars`, `model=${sel.model.id}`);
-    }
+    rlog?.('DONE', VC.green, `${response.length} chars`, `model=${sel.model.id}`);
 
     const responseId = randomUUID();
     this.db.insertMessage({
