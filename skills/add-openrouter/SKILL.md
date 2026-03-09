@@ -59,7 +59,7 @@ If the user doesn't have an OpenRouter API key:
    POST https://openrouter.ai/api/v1/chat/completions
    Headers:
      Authorization: Bearer {OPENROUTER_API_KEY}
-     HTTP-Referer: https://github.com/betaclaw
+     HTTP-Referer: https://github.com/Rawknee-69/Beta-Claw
      X-Title: betaclaw
    Body: {
      "model": "meta-llama/llama-3.1-8b-instruct:free",

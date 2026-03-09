@@ -936,7 +936,7 @@ async function runWizardSteps(rl: readline.Interface, state: SetupState): Promis
       console.log();
     }
 
-    console.log(`  Documentation: ${dim(clr.cyan + 'https://github.com/betaclaw' + R)}`);
+    console.log(`  Documentation: ${dim(clr.cyan + 'https://github.com/Rawknee-69/Beta-Claw' + R)}`);
     console.log();
   }
 }
