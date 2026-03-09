@@ -21,6 +21,7 @@ export interface LoopConfig {
   senderId?: string;
   sessionKey?: string;
   sandboxOpts: SandboxRunOptions;
+  signal?: AbortSignal;
   onLLMCall?: (iteration: number, messageCount: number) => void;
   onToolStart?: (name: string, args: Record<string, unknown>) => void;
   onToolCall?: (name: string, args: Record<string, unknown>, result: string) => void;
@@ -35,6 +36,7 @@ interface ToolCall { name: string; args: Record<string, unknown> }
 export async function agentLoop(messages: Message[], cfg: LoopConfig): Promise<string> {
   const exec = new ToolExecutor(cfg.groupId, process.cwd(), cfg.sandboxOpts);
   if (cfg.onApprovalRequired) exec.onApprovalRequired = cfg.onApprovalRequired;
+  if (cfg.signal) exec.signal = cfg.signal;
   const max = cfg.maxIterations ?? MAX_ITERATIONS;
   let hist = [...messages];
   const sessionKey = cfg.sessionKey ?? 'main';
@@ -51,6 +53,8 @@ export async function agentLoop(messages: Message[], cfg: LoopConfig): Promise<s
   }
 
   for (let i = 0; i < max; i++) {
+    if (cfg.signal?.aborted) return '';
+
     const trimmed = trimHistory(hist, cfg.model.id, cfg.systemPrompt);
     cfg.onLLMCall?.(i, trimmed.length);
 

@@ -45,42 +45,56 @@ export async function sandboxedExec(
   cwd: string,
   opts: SandboxRunOptions,
   timeoutMs = 30_000,
+  signal?: AbortSignal,
 ): Promise<string> {
-  if (!shouldSandbox(opts)) return hostExec(cmd, cwd, timeoutMs);
+  if (signal?.aborted) return 'exec cancelled: interrupted by new message';
+  if (!shouldSandbox(opts)) return hostExec(cmd, cwd, timeoutMs, signal);
   // Gracefully fall back to host execution when Docker is unavailable
   // rather than returning a hard error string that confuses the agent.
   if (!dockerAvailable()) {
     console.warn('[sandbox] Docker unavailable — falling back to host execution');
-    return hostExec(cmd, cwd, timeoutMs);
+    return hostExec(cmd, cwd, timeoutMs, signal);
   }
-  return dockerExec(cmd, opts, timeoutMs);
+  return dockerExec(cmd, opts, timeoutMs, signal);
 }
 
-function hostExec(cmd: string, cwd: string, timeoutMs: number): Promise<string> {
-  return spawnAsync('bash', ['-c', cmd], { cwd, env: process.env }, timeoutMs);
+function hostExec(cmd: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<string> {
+  // Use absolute shell path — searching by name fails when PATH is minimal.
+  // Resolve cwd to absolute so spawn never gets ENOENT from a relative path.
+  const shell  = fs.existsSync('/bin/bash') ? '/bin/bash' : '/bin/sh';
+  const absCwd = path.isAbsolute(cwd) ? cwd : path.resolve(cwd);
+  return spawnAsync(shell, ['-c', cmd], { cwd: absCwd, env: process.env, signal }, timeoutMs);
 }
 
-function dockerExec(cmd: string, opts: SandboxRunOptions, timeoutMs: number): Promise<string> {
+function dockerExec(cmd: string, opts: SandboxRunOptions, timeoutMs: number, signal?: AbortSignal): Promise<string> {
   const id = ensureContainer(opts);
   if (!id) return Promise.resolve('Sandbox unavailable: Docker not found or image not built.\nRun: microclaw sandbox setup');
-  return spawnAsync('docker', ['exec', id, 'bash', '-c', cmd], { env: process.env }, timeoutMs);
+  return spawnAsync('docker', ['exec', id, 'bash', '-c', cmd], { env: process.env, signal }, timeoutMs);
 }
 
 function spawnAsync(
   file: string,
   args: string[],
-  opts: { cwd?: string; env?: NodeJS.ProcessEnv },
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal },
   timeoutMs: number,
 ): Promise<string> {
   return new Promise((resolve) => {
     const chunks: { stream: 'out' | 'err'; data: string }[] = [];
-    let timedOut = false;
+    let timedOut  = false;
+    let cancelled = false;
 
     const child = spawn(file, args, {
       encoding: 'utf-8',
       cwd: opts.cwd,
       env: opts.env,
     } as Parameters<typeof spawn>[2]);
+
+    // Kill the child immediately if the caller's AbortSignal fires
+    const onAbort = () => {
+      cancelled = true;
+      child.kill('SIGKILL');
+    };
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -92,6 +106,11 @@ function spawnAsync(
 
     child.on('close', (code) => {
       clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', onAbort);
+      if (cancelled) {
+        resolve('exec cancelled: interrupted by new message');
+        return;
+      }
       const stdout = chunks.filter(c => c.stream === 'out').map(c => c.data).join('');
       const stderr = chunks.filter(c => c.stream === 'err').map(c => c.data).join('');
       if (timedOut) {
@@ -107,6 +126,11 @@ function spawnAsync(
 
     child.on('error', (err) => {
       clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', onAbort);
+      if (cancelled) {
+        resolve('exec cancelled: interrupted by new message');
+        return;
+      }
       resolve(`exec error: ${err.message}`);
     });
   });
