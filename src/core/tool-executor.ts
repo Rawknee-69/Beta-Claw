@@ -13,7 +13,6 @@ export type ApprovalCallback = (warning: string) => Promise<boolean>;
 
 export class ToolExecutor {
   onApprovalRequired?: ApprovalCallback;
-  signal?: AbortSignal;
   private workspaceDir: string;
 
   constructor(
@@ -75,8 +74,6 @@ export class ToolExecutor {
   }
 
   private async exec(cmd: string, cwd?: string, timeout = 30_000): Promise<string> {
-    if (this.signal?.aborted) return 'exec cancelled: interrupted by new message';
-
     for (const b of BLOCKED) {
       if (cmd.includes(b)) return 'Blocked: dangerous command pattern detected';
     }
@@ -94,7 +91,7 @@ export class ToolExecutor {
     }
 
     const effectiveCwd = cwd ?? this.workspaceDir;
-    return sandboxedExec(cmd, effectiveCwd, this.sandboxOpts, timeout, this.signal);
+    return sandboxedExec(cmd, effectiveCwd, this.sandboxOpts, timeout);
   }
 
   private list(dirPath: string, recursive = false): string {

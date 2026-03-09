@@ -121,14 +121,10 @@ class Orchestrator extends EventEmitter {
   private readonly registry: ProviderRegistry = new ProviderRegistry();
   private readonly messageQueue: MessageQueue = new MessageQueue();
   private readonly skillWatcher: SkillWatcher = new SkillWatcher();
-  // Allow up to 2 concurrent runs per group so a new message can start processing
-  // immediately while the previous run is being aborted (the abort kills any running
-  // exec process, after which the old run exits and the slot is freed).
+  // Allow up to 2 concurrent runs per group so new messages are processed immediately
+  // even if the previous run is still executing a long-running command (npm install,
+  // file writes, etc.).  Each run is fully isolated — neither kills the other.
   private readonly queueConfig: Partial<QueueConfig> = { mode: 'collect', debounceMs: 1000, cap: 20, drop: 'summarize', maxConcurrent: 2 };
-  // Tracks the AbortController for the currently active agent-loop run per group.
-  // When a new message arrives while one is active, the old run is aborted so it
-  // doesn't hold up the event loop and its exec process is killed immediately.
-  private readonly runAborts = new Map<string, AbortController>();
   private catalog: ModelEntry[] = [];
   private scheduler: TaskScheduler | null = null;
   private heartbeatScheduler: HeartbeatScheduler | null = null;
@@ -143,25 +139,17 @@ class Orchestrator extends EventEmitter {
     this.messageQueue.setHandler(async (entry) => {
       const { msg, channel: ch } = entry;
 
-      // Abort any previous run for this group so its exec process is killed immediately
-      // and doesn't monopolise the event loop while we process the new message.
-      this.runAborts.get(msg.groupId)?.abort();
-      const ctrl = new AbortController();
-      this.runAborts.set(msg.groupId, ctrl);
-
       if (this.config.verbose) {
         vlog('MSG', VC.cyan, `[${ch.id}] ${msg.groupId}`, `"${msg.content.slice(0, 80)}${msg.content.length > 80 ? '…' : ''}"`);
       }
       await ch.sendTyping?.(msg.groupId).catch(() => {});
-      const result = await this.handleMessage(msg, ch, ctrl.signal).catch((e: unknown) => {
+      const result = await this.handleMessage(msg, ch).catch((e: unknown) => {
         this.logger.error({ err: e, groupId: msg.groupId }, 'Error processing message');
         if (this.config.verbose) vlog('ERR', VC.red, `${e instanceof Error ? e.message : String(e)}`);
         return { response: `Error: ${e instanceof Error ? e.message : String(e)}`, modelId: '' };
       });
-      this.runAborts.delete(msg.groupId);
       const { response, modelId: usedModelId } = result;
 
-      // If the run was aborted (new message arrived) and produced no content, skip send.
       if (!response.trim()) return;
 
       if (this.config.verbose) {
@@ -367,7 +355,7 @@ class Orchestrator extends EventEmitter {
     this.messageQueue.enqueue(msg, channel, this.queueConfig);
   }
 
-  private async handleMessage(msg: InboundMessage, channel: IChannel, signal?: AbortSignal): Promise<{ response: string; modelId: string }> {
+  private async handleMessage(msg: InboundMessage, channel: IChannel): Promise<{ response: string; modelId: string }> {
     this.db.insertMessage({
       id: msg.id,
       group_id: msg.groupId,
@@ -452,7 +440,6 @@ class Orchestrator extends EventEmitter {
       senderId: msg.senderId,
       sessionKey,
       sandboxOpts,
-      signal,
       onLLMCall: (iter, msgs) => {
         if (this.config.verbose) {
           vlog('LLM', VC.cyan, `round ${iter + 1}`, `model=${sel.model.id}  msgs=${msgs}`);
