@@ -181,9 +181,40 @@ export class WhatsAppChannel implements IChannel {
     if (!this.sock) throw new Error('WhatsApp not connected');
     const sendMessage = (this.sock as Record<string, (...a: unknown[]) => Promise<void>>)['sendMessage'];
     if (!sendMessage) throw new Error('WhatsApp socket has no sendMessage');
+
+    const attachments = msg.attachments ?? [];
+
+    // If there are attachments, send them using the appropriate WhatsApp message type.
+    if (attachments.length > 0) {
+      // Send text as caption on the first media message when possible.
+      const caption = msg.content?.trim() || undefined;
+      for (const [idx, att] of attachments.entries()) {
+        const isFirst = idx === 0;
+        const base: Record<string, unknown> = {};
+
+        if (att.type === 'image') {
+          base['image'] = att.data;
+        } else if (att.type === 'audio') {
+          base['audio'] = att.data;
+        } else {
+          base['document'] = att.data;
+        }
+
+        if (att.mimeType) base['mimetype'] = att.mimeType;
+        if (att.filename) base['fileName'] = att.filename;
+        if (isFirst && caption) base['caption'] = caption;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (sendMessage as any).call(this.sock, msg.groupId, base);
+      }
+      return;
+    }
+
+    // Fallback: plain text message, chunked to avoid WhatsApp limits.
     const chunks = chunkText(msg.content, 4000);
     for (const chunk of chunks) {
-      await sendMessage.call(this.sock, msg.groupId, { text: chunk });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (sendMessage as any).call(this.sock, msg.groupId, { text: chunk });
     }
   }
 

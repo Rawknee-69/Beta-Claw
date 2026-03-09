@@ -12,7 +12,11 @@ export async function sendWithInterception(
 
   const imageMatch = response.match(/\[IMAGE:\s*(.+?)\]/s);
   if (imageMatch) {
-    const result = await generateImage(imageMatch[1]!.trim(), modelId, groupId);
+    let result: { filePath: string; mimeType: string } | null = null;
+    try {
+      result = await generateImage(imageMatch[1]!.trim(), modelId, groupId);
+    } catch { /* generation failed — handled below */ }
+
     if (result && fs.existsSync(result.filePath)) {
       await channel.send({
         groupId: msg.groupId,
@@ -26,24 +30,41 @@ export async function sendWithInterception(
       });
       return;
     }
+
+    // Strip the raw [IMAGE: ...] tag so users never see it
+    const cleaned = response.replace(/\[IMAGE:\s*.+?\]/s, '').trim();
+    msg = {
+      ...msg,
+      content: cleaned || '(Image generation is currently unavailable — no provider configured.)',
+    };
   }
 
   const voiceMatch = response.match(/\[VOICE:\s*(.+?)\]/s);
   if (voiceMatch) {
-    const result = await generateAudio(voiceMatch[1]!.trim(), modelId, groupId);
-    if (result && fs.existsSync(result.filePath)) {
+    let voiceResult: { filePath: string; mimeType: string } | null = null;
+    try {
+      voiceResult = await generateAudio(voiceMatch[1]!.trim(), modelId, groupId);
+    } catch { /* generation failed — handled below */ }
+
+    if (voiceResult && fs.existsSync(voiceResult.filePath)) {
       await channel.send({
         groupId: msg.groupId,
         content: response.replace(/\[VOICE:\s*.+?\]/s, '').trim(),
         attachments: [{
           type: 'audio',
-          data: fs.readFileSync(result.filePath),
-          mimeType: result.mimeType,
+          data: fs.readFileSync(voiceResult.filePath),
+          mimeType: voiceResult.mimeType,
           filename: 'voice.mp3',
         }],
       });
       return;
     }
+
+    const cleanedVoice = response.replace(/\[VOICE:\s*.+?\]/s, '').trim();
+    msg = {
+      ...msg,
+      content: cleanedVoice || voiceMatch[1]!.trim(),
+    };
   }
 
   const ssMatch = response.match(/\[SCREENSHOT:(.+?)\]/);

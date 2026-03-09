@@ -8,6 +8,8 @@ dotenv.config();
 async function getDB() {
   const { MicroClawDB } = await import('../../db.js');
   const { DB_PATH } = await import('../../core/paths.js');
+  // Prefer the env var set by the daemon so the path is always absolute
+  // regardless of the cwd this subprocess was launched from.
   return new MicroClawDB(process.env['MICROCLAW_DB'] ?? DB_PATH);
 }
 
@@ -71,6 +73,45 @@ scheduleCommand
           console.log(`      Task:   ${t.instruction}`);
           if (t.last_run) console.log(`      Last:   ${new Date(t.last_run).toLocaleString()}`);
           console.log();
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+scheduleCommand
+  .command('status')
+  .description('Show scheduled tasks for a group (recurring + pending one-shots)')
+  .requiredOption('--group <groupId>', 'Target group/chat')
+  .action(async (opts: { group: string }) => {
+    const db = await getDB();
+    try {
+      const recurring = db.getScheduledTasksByGroup(opts.group);
+      const pendingOnce = db.getPendingOnceTasks()
+        .filter(t => t.group_id === opts.group);
+
+      if (recurring.length === 0 && pendingOnce.length === 0) {
+        console.log(`No scheduled tasks for group ${opts.group}.`);
+        return;
+      }
+
+      if (recurring.length) {
+        console.log(`\nRecurring tasks for ${opts.group} (${recurring.length}):\n`);
+        for (const t of recurring) {
+          console.log(`  [${t.id.slice(0, 8)}] ${t.name}`);
+          console.log(`      Cron:   ${t.cron}`);
+          console.log(`      Task:   ${t.instruction}`);
+          if (t.last_run) console.log(`      Last:   ${new Date(t.last_run).toLocaleString()}`);
+          console.log();
+        }
+      }
+
+      if (pendingOnce.length) {
+        console.log(`\nPending one-shot reminders for ${opts.group} (${pendingOnce.length}):\n`);
+        for (const t of pendingOnce) {
+          const etaSec = Math.max(0, Math.round((t.run_at - Date.now()) / 1000));
+          console.log(`  [${t.id}] "${t.message.slice(0, 60)}" in ${etaSec}s`);
         }
       }
     } finally {
