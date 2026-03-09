@@ -129,12 +129,10 @@ class Orchestrator extends EventEmitter {
   private readonly registry: ProviderRegistry = new ProviderRegistry();
   private readonly messageQueue: MessageQueue = new MessageQueue();
   private readonly skillWatcher: SkillWatcher = new SkillWatcher();
-  // Allow up to 2 concurrent runs per group so new messages are processed immediately
-  // even if the previous run is still executing a long-running command (npm install,
-  // file writes, etc.).  Each run is fully isolated — neither kills the other.
-  // 5 concurrent slots per group: chat + browser session + long build + cron delivery + spare.
-  // Each slot is fully isolated — none waits for, kills, or reads the state of another.
-  private readonly queueConfig: Partial<QueueConfig> = { mode: 'collect', debounceMs: 1000, cap: 20, drop: 'summarize', maxConcurrent: 5 };
+  // 2 concurrent slots per group: one for active chat, one for a long-running background task
+  // (build, browser session, cron delivery).  5 was the previous value but caused multiple
+  // parallel runs to each produce a reply to the same message — visible as duplicate responses.
+  private readonly queueConfig: Partial<QueueConfig> = { mode: 'collect', debounceMs: 1000, cap: 20, drop: 'summarize', maxConcurrent: 2 };
   private catalog: ModelEntry[] = [];
   private scheduler: TaskScheduler | null = null;
   private heartbeatScheduler: HeartbeatScheduler | null = null;

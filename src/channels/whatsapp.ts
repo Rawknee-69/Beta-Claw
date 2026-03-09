@@ -145,7 +145,6 @@ export class WhatsAppChannel implements IChannel {
               content,
               timestamp: ts,
             };
-
             for (const handler of this.handlers) {
               await handler(inbound);
             }

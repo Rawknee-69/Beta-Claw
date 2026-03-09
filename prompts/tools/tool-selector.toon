@@ -11,15 +11,14 @@
 
     Selection priority (highest first):
     1. EXPLICIT: user names the tool directly → use it.
-       "search for X" → brave_search | "read file Y" → read_file
+       "search for X" → web_search | "read file Y" → read
     2. INTENT MATCH: map intent category to tool:
-       - Information retrieval → brave_search, fetch_url, memory_search
-       - Code tasks → run_cmd, write_file, read_file
-       - File management → write_file, read_file, list_dir
-       - Package install → install_pkg
-       - Messaging → send_message, send_whatsapp
-       - Memory → memory_save, memory_search
-       - Scheduling → cron_add, cron_list, cron_delete
+       - Information retrieval → web_search, web_fetch, memory_read
+       - Code tasks → exec, write, read
+       - File management → write, read, list
+       - Scheduling → exec (microclaw schedule ...)
+       - Memory → memory_read, memory_write
+       - Messaging → exec (microclaw send ...)
     3. COMPOSITE: task needs multiple tools in sequence.
        Order by data dependency: step N+1 uses output of step N.
 

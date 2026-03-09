@@ -64,7 +64,10 @@ export async function agentLoop(messages: Message[], cfg: LoopConfig): Promise<s
         tools,
       });
     } catch (e) {
-      return `Provider error: ${e instanceof Error ? e.message : String(e)}`;
+      // Log for debugging but never forward raw provider/Zod error text to the user.
+      const detail = e instanceof Error ? e.message : String(e);
+      cfg.onToolCall?.('_error', {}, detail);
+      return "I hit a snag on my end — could you try that again?";
     }
 
     const calls = extractCalls(response);

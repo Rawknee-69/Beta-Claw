@@ -139,7 +139,12 @@ class GoogleAdapter implements IProviderAdapter {
     }
 
     const raw: unknown = await response.json();
-    const parsed = GeminiResponseSchema.parse(raw);
+    let parsed: z.infer<typeof GeminiResponseSchema>;
+    try {
+      parsed = GeminiResponseSchema.parse(raw);
+    } catch {
+      throw new Error('Google returned an unexpected response shape');
+    }
 
     const candidate = parsed.candidates[0];
     if (!candidate) {
@@ -150,6 +155,12 @@ class GoogleAdapter implements IProviderAdapter {
     const finishReason = candidate.finishReason;
 
     if (!candidate.content?.parts) {
+      // MALFORMED_FUNCTION_CALL means the model tried to call a tool but produced invalid
+      // JSON for the arguments. Throw so the agent-loop can handle it rather than forwarding
+      // the raw technical string directly to the user as chat content.
+      if (finishReason === 'MALFORMED_FUNCTION_CALL') {
+        throw new Error('Model produced a malformed tool call — please rephrase your request');
+      }
       let fallback: string;
       if (finishReason === 'SAFETY')          fallback = '[Response blocked by safety filter]';
       else if (finishReason === 'MAX_TOKENS') fallback = '[Response cut off: token limit]';

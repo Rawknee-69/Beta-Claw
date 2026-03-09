@@ -678,19 +678,31 @@ async function benchmarkQueue(): Promise<void> {
 async function benchmarkRetry(): Promise<void> {
   header('RetryPolicy — Backoff Timing & Attempt Counting');
 
+  // Per-channel config table (whatsapp=1 to prevent duplicate delivery on Baileys reconnect)
+  const { CHANNEL_RETRY_DEFAULTS } = await import('../../execution/retry-policy.js');
+  console.log(`  ${'Channel'.padEnd(14)}${'Attempts'.padEnd(12)}${'MinDelay'.padEnd(12)}Notes`);
+  console.log(`  ${DIM}${'─'.repeat(58)}${RESET}`);
+  for (const [ch, cfg] of Object.entries(CHANNEL_RETRY_DEFAULTS)) {
+    const note = ch === 'whatsapp' ? `${DIM}no retries — Baileys not idempotent${RESET}` : '';
+    console.log(`  ${ch.padEnd(14)}${String(cfg.attempts).padEnd(12)}${String(cfg.minDelayMs).padEnd(12)}ms  ${note}`);
+  }
+  console.log();
+
   const tests = [
-    { label: 'Transient ECONNRESET', shouldSucceed: false, err: new Error('econnreset'), expectedAttempts: 3 },
-    { label: 'HTTP 429 rate limit',  shouldSucceed: false, err: new Error('HTTP 429 rate limit'), expectedAttempts: 3 },
-    { label: 'Fatal auth error',     shouldSucceed: false, err: new Error('401 Unauthorized'), expectedAttempts: 1 },
-    { label: 'Success on 2nd try',   shouldSucceed: true,  err: new Error('econnreset'), expectedAttempts: 2 },
+    { label: 'Transient ECONNRESET (default)', shouldSucceed: false, err: new Error('econnreset'), expectedAttempts: 3 },
+    { label: 'HTTP 429 rate limit (default)',  shouldSucceed: false, err: new Error('HTTP 429 rate limit'), expectedAttempts: 3 },
+    { label: 'Fatal auth error (default)',     shouldSucceed: false, err: new Error('401 Unauthorized'), expectedAttempts: 1 },
+    { label: 'Success on 2nd try (default)',   shouldSucceed: true,  err: new Error('econnreset'), expectedAttempts: 2 },
+    { label: 'ECONNRESET on WhatsApp',         shouldSucceed: false, err: new Error('econnreset'), expectedAttempts: 1, cfg: { attempts: 1, minDelayMs: 1, maxDelayMs: 10, jitter: 0 } },
   ];
 
-  console.log(`  ${'Test'.padEnd(30)}${'Attempts'.padEnd(10)}${'Match'.padEnd(10)}${'Time'}`);
-  console.log(`  ${DIM}${'─'.repeat(55)}${RESET}`);
+  console.log(`  ${'Test'.padEnd(38)}${'Attempts'.padEnd(10)}${'Match'.padEnd(10)}${'Time'}`);
+  console.log(`  ${DIM}${'─'.repeat(63)}${RESET}`);
 
   for (const t of tests) {
     let attempts = 0;
     const start = performance.now();
+    const retryCfg = (t as { cfg?: typeof tests[0]['cfg'] }).cfg ?? { attempts: 3, minDelayMs: 1, maxDelayMs: 10, jitter: 0 };
     try {
       await withRetry(
         async () => {
@@ -698,14 +710,14 @@ async function benchmarkRetry(): Promise<void> {
           if (t.shouldSucceed && attempts >= 2) return 'ok';
           throw t.err;
         },
-        { attempts: 3, minDelayMs: 1, maxDelayMs: 10, jitter: 0 },
+        retryCfg,
         isTransientError,
       );
     } catch { /* expected */ }
     const elapsed = performance.now() - start;
     const match = attempts === t.expectedAttempts;
     const color = match ? GREEN : RED;
-    console.log(`  ${t.label.padEnd(30)}${String(attempts).padEnd(10)}${color}${String(match).padEnd(10)}${RESET}${DIM}${elapsed.toFixed(1)}ms${RESET}`);
+    console.log(`  ${t.label.padEnd(38)}${String(attempts).padEnd(10)}${color}${String(match).padEnd(10)}${RESET}${DIM}${elapsed.toFixed(1)}ms${RESET}`);
   }
 }
 

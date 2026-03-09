@@ -11,7 +11,7 @@
     "microclaw": "./dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/cli/index.js",
     "dev": "tsx src/cli/index.ts",
     "start": "tsx src/cli/index.ts start --foreground",
     "start:bg": "tsx src/cli/index.ts start",

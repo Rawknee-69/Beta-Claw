@@ -22,9 +22,12 @@ export interface RetryConfig {
 
 /** Channel-specific defaults matching openclaw's retry policy. */
 export const CHANNEL_RETRY_DEFAULTS: Record<string, RetryConfig> = {
-  discord:  { attempts: 3, minDelayMs: 500,  maxDelayMs: 30_000, jitter: 0.1 },
-  telegram: { attempts: 3, minDelayMs: 400,  maxDelayMs: 30_000, jitter: 0.1 },
-  default:  { attempts: 3, minDelayMs: 200,  maxDelayMs: 30_000, jitter: 0.1 },
+  discord:   { attempts: 3, minDelayMs: 500,  maxDelayMs: 30_000, jitter: 0.1 },
+  telegram:  { attempts: 3, minDelayMs: 400,  maxDelayMs: 30_000, jitter: 0.1 },
+  // WhatsApp (Baileys) has no idempotency — a retry after a transient post-delivery
+  // connection reset will send a duplicate message. Single attempt only.
+  whatsapp:  { attempts: 1, minDelayMs: 200,  maxDelayMs: 30_000, jitter: 0.1 },
+  default:   { attempts: 3, minDelayMs: 200,  maxDelayMs: 30_000, jitter: 0.1 },
 };
 
 export function getRetryConfig(channelId: string): RetryConfig {
