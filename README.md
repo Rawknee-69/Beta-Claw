@@ -1,4 +1,4 @@
-# betaclaw
+# [Betaclaw](./banner.jpeg)
 
 **Token-optimized AI assistant with multi-provider support**
 
